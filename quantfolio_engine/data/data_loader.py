@@ -402,6 +402,34 @@ class DataLoader:
 
         return returns_df, macro_df, sentiment_df
 
+    def normalize_returns(self, returns_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Normalize returns data (z-score and rolling % change).
+        Returns a DataFrame with z-scored returns.
+        """
+        # Z-score normalization
+        norm_df = (returns_df - returns_df.mean()) / returns_df.std(ddof=0)
+        norm_df.index.name = returns_df.index.name
+        return norm_df
+
+    def normalize_macro(self, macro_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Normalize macro indicators (z-score).
+        Returns a DataFrame with z-scored macro indicators.
+        """
+        norm_df = (macro_df - macro_df.mean()) / macro_df.std(ddof=0)
+        norm_df.index.name = macro_df.index.name
+        return norm_df
+
+    def normalize_sentiment(self, sentiment_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Normalize sentiment scores (z-score).
+        Returns a DataFrame with z-scored sentiment scores.
+        """
+        norm_df = (sentiment_df - sentiment_df.mean()) / sentiment_df.std(ddof=0)
+        norm_df.index.name = sentiment_df.index.name
+        return norm_df
+
 
 def main():
     """Main function for testing the data loader."""

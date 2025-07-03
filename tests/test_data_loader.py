@@ -2,6 +2,7 @@
 
 from unittest.mock import Mock, patch
 
+import numpy as np
 import pandas as pd
 
 from quantfolio_engine.config import ASSET_UNIVERSE, MACRO_INDICATORS
@@ -134,6 +135,27 @@ class TestDataLoader:
             mock_returns.assert_called_once()
             mock_macro.assert_called_once()
             mock_sentiment.assert_called_once()
+
+    def test_normalization(self):
+        """Test normalization utilities for returns, macro, and sentiment."""
+        loader = DataLoader()
+        # Create dummy data
+        df = pd.DataFrame(
+            {"A": np.random.normal(10, 2, 100), "B": np.random.normal(-5, 5, 100)},
+            index=pd.date_range("2020-01-01", periods=100),
+        )
+        # Returns normalization
+        norm = loader.normalize_returns(df)
+        assert np.allclose(norm.mean(skipna=True), 0, atol=1e-1)
+        assert np.allclose(norm.std(skipna=True, ddof=0), 1, atol=1e-1)
+        # Macro normalization
+        norm = loader.normalize_macro(df)
+        assert np.allclose(norm.mean(skipna=True), 0, atol=1e-1)
+        assert np.allclose(norm.std(skipna=True, ddof=0), 1, atol=1e-1)
+        # Sentiment normalization
+        norm = loader.normalize_sentiment(df)
+        assert np.allclose(norm.mean(skipna=True), 0, atol=1e-1)
+        assert np.allclose(norm.std(skipna=True, ddof=0), 1, atol=1e-1)
 
 
 def test_data_loader_import():

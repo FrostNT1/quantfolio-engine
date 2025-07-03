@@ -276,5 +276,48 @@ def validate_data():
                 logger.info(f"  Std Return: {stats['std_return']:.4f}")
 
 
+@app.command()
+def normalize_data():
+    """Normalize processed returns, macro, and sentiment data and save as *_normalized.csv."""
+    import pandas as pd
+
+    from .config import PROCESSED_DATA_DIR
+
+    loader = DataLoader()
+
+    # Normalize returns
+    returns_file = PROCESSED_DATA_DIR / "returns_monthly.csv"
+    if returns_file.exists():
+        returns_df = pd.read_csv(returns_file, index_col=0, parse_dates=True)
+        norm_returns = loader.normalize_returns(returns_df)
+        out_file = PROCESSED_DATA_DIR / "returns_monthly_normalized.csv"
+        norm_returns.to_csv(out_file)
+        logger.success(f"Saved normalized returns to {out_file}")
+    else:
+        logger.warning("returns_monthly.csv not found")
+
+    # Normalize macro
+    macro_file = PROCESSED_DATA_DIR / "macro_monthly.csv"
+    if macro_file.exists():
+        macro_df = pd.read_csv(macro_file, index_col=0, parse_dates=True)
+        norm_macro = loader.normalize_macro(macro_df)
+        out_file = PROCESSED_DATA_DIR / "macro_monthly_normalized.csv"
+        norm_macro.to_csv(out_file)
+        logger.success(f"Saved normalized macro data to {out_file}")
+    else:
+        logger.warning("macro_monthly.csv not found")
+
+    # Normalize sentiment
+    sentiment_file = PROCESSED_DATA_DIR / "sentiment_monthly.csv"
+    if sentiment_file.exists():
+        sentiment_df = pd.read_csv(sentiment_file, index_col=0, parse_dates=True)
+        norm_sentiment = loader.normalize_sentiment(sentiment_df)
+        out_file = PROCESSED_DATA_DIR / "sentiment_monthly_normalized.csv"
+        norm_sentiment.to_csv(out_file)
+        logger.success(f"Saved normalized sentiment data to {out_file}")
+    else:
+        logger.warning("sentiment_monthly.csv not found")
+
+
 if __name__ == "__main__":
     app()

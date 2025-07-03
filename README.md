@@ -21,7 +21,8 @@ A quantitative portfolio optimization engine designed for institutional asset ma
 - [x] Retrieve 5–10 macro indicators from FRED or equivalent
 - [x] Load static or dynamic sentiment scores for corresponding timeframes
     - ⚠️ Note: Sentiment score is currently placeholder/random. Replace with live data from a real API (e.g., News API, RavenPack) in this phase.
-- [ ] Normalize all data (e.g., Z-scores, rolling %change)
+- [x] Normalize all data (e.g., Z-scores, rolling %change)
+    - Normalization implemented for returns, macro, and sentiment data.
 
 ### 🔹 Phase 2: Factor Timing Signal Builder
 - [ ] Calculate factor exposures using regression (Fama-French 3 or 5 factor model)
