@@ -17,9 +17,10 @@ A quantitative portfolio optimization engine designed for institutional asset ma
 ## 🚀 Development Roadmap
 
 ### 🔹 Phase 1: Data Ingestion & Preprocessing
-- [ ] Fetch historical prices for 30–100 assets (e.g. S&P 500 subset, ETFs)
-- [ ] Retrieve 5–10 macro indicators from FRED or equivalent
-- [ ] Load static or dynamic sentiment scores for corresponding timeframes
+- [x] Fetch historical prices for 30–100 assets (e.g. S&P 500 subset, ETFs)
+- [x] Retrieve 5–10 macro indicators from FRED or equivalent
+- [x] Load static or dynamic sentiment scores for corresponding timeframes
+    - ⚠️ Note: Sentiment score is currently placeholder/random. Replace with live data from a real API (e.g., News API, RavenPack) in this phase.
 - [ ] Normalize all data (e.g., Z-scores, rolling %change)
 
 ### 🔹 Phase 2: Factor Timing Signal Builder
