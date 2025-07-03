@@ -25,11 +25,11 @@ A quantitative portfolio optimization engine designed for institutional asset ma
     - Normalization implemented for returns, macro, and sentiment data.
 
 ### 🔹 Phase 2: Factor Timing Signal Builder
-- [ ] Calculate factor exposures using regression (Fama-French 3 or 5 factor model)
-- [ ] Detect factor regimes using:
-  - [ ] Rolling means / volatilities
-  - [ ] Clustering methods (e.g. k-means, DBSCAN)
-  - [ ] HMMs for regime probabilities
+- [x] Calculate factor exposures using regression (Fama-French 3 or 5 factor model)
+- [x] Detect factor regimes using:
+  - [x] Rolling means / volatilities
+  - [x] Clustering methods (e.g. k-means, DBSCAN)
+  - [x] HMMs for regime probabilities
 
 ### 🔹 Phase 3: Portfolio Optimization Engine
 - [ ] Implement Black-Litterman:

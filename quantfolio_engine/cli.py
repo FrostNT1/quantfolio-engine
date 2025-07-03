@@ -4,6 +4,8 @@ Command Line Interface for QuantFolio Engine.
 This module provides CLI commands for data operations, model training, and portfolio optimization.
 """
 
+from typing import Optional
+
 from loguru import logger
 import typer
 
@@ -317,6 +319,71 @@ def normalize_data():
         logger.success(f"Saved normalized sentiment data to {out_file}")
     else:
         logger.warning("sentiment_monthly.csv not found")
+
+
+@app.command()
+def generate_signals(
+    lookback_period: int = typer.Option(
+        60,
+        "--lookback",
+        "-l",
+        help="Lookback period for rolling factor exposure calculation (months)",
+    ),
+    n_regimes: int = typer.Option(
+        3,
+        "--regimes",
+        "-r",
+        help="Number of regimes to detect",
+    ),
+    returns_file: Optional[str] = typer.Option(
+        None,
+        "--returns",
+        help="Path to returns CSV file (default: data/processed/returns_monthly.csv)",
+    ),
+    factors_file: Optional[str] = typer.Option(
+        None,
+        "--factors",
+        help="Path to factors CSV file (default: data/processed/macro_monthly.csv)",
+    ),
+):
+    """
+    Generate factor timing signals from processed data.
+
+    This command calculates factor exposures using rolling regression and detects
+    factor regimes using clustering and HMM methods.
+    """
+    from .signals.factor_timing import FactorTimingEngine
+
+    logger.info("Starting factor timing signal generation...")
+
+    # Initialize factor timing engine
+    engine = FactorTimingEngine(lookback_period=lookback_period, n_regimes=n_regimes)
+
+    # Generate signals
+    results = engine.generate_factor_timing_signals(
+        returns_file=returns_file, factors_file=factors_file
+    )
+
+    if results:
+        logger.success("Factor timing signals generated successfully!")
+
+        # Log summary
+        if "factor_exposures" in results and not results["factor_exposures"].empty:
+            exposures = results["factor_exposures"]
+            logger.info(
+                f"Generated factor exposures for {len(exposures.columns)} assets"
+            )
+            logger.info(
+                f"Date range: {exposures.index.min()} to {exposures.index.max()}"
+            )
+
+        if "rolling_regimes" in results and not results["rolling_regimes"].empty:
+            logger.info("Rolling statistics regime detection completed")
+
+        if "hmm_regimes" in results and not results["hmm_regimes"].empty:
+            logger.info("HMM regime detection completed")
+    else:
+        logger.error("Failed to generate factor timing signals")
 
 
 if __name__ == "__main__":
