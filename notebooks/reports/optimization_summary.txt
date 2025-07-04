@@ -1,0 +1,10 @@
+Portfolio Optimization Summary
+==================================================
+Method: monte_carlo
+Expected Return: 0.228
+Volatility: 0.115
+Sharpe Ratio: 1.595
+Max Drawdown: -0.043
+VaR (95%): -0.036
+
+Constraints: {'max_weight': 0.25, 'min_weight': 0.05}

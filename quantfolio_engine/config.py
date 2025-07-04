@@ -89,3 +89,51 @@ try:
     logger.add(lambda msg: tqdm.write(msg, end=""), colorize=True)
 except ModuleNotFoundError:
     pass
+
+# Black-Litterman Configuration
+from dataclasses import dataclass
+from typing import Dict, Optional
+
+
+@dataclass
+class BlackLittermanConfig:
+    """Configuration for Black-Litterman optimization parameters."""
+
+    # Market risk aversion calibration
+    lambda_auto: bool = True
+    lambda_range: tuple = (0.5, 10.0)  # Much wider range to ensure π > rf
+    lambda_points: int = 30
+
+    # Grand view blend
+    grand_view_gamma: float = 0.3  # Blend parameter for grand view
+
+    # View strength and regime multipliers
+    view_strength: float = 1.5
+    regime_multipliers: Dict[int, float] = None
+
+    # Prior uncertainty
+    tau: float = 0.05
+
+    # View uncertainty scaling
+    view_uncertainty_scale: float = 0.5
+
+    def __post_init__(self):
+        """Set default regime multipliers if not provided."""
+        if self.regime_multipliers is None:
+            self.regime_multipliers = {
+                0: 2.0,  # Bull market - much stronger views
+                1: 1.2,  # Neutral market - moderate views
+                2: 1.5,  # Bear market - stronger views
+            }
+
+    def get_adjusted_view_strength(self, regime: Optional[int] = None) -> float:
+        """Get view strength adjusted for current regime."""
+        if regime is None:
+            return self.view_strength
+
+        regime_multiplier = self.regime_multipliers.get(regime, 1.0)
+        return self.view_strength * regime_multiplier
+
+
+# Default configuration
+DEFAULT_BL_CONFIG = BlackLittermanConfig()
