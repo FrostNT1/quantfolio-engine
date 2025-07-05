@@ -283,7 +283,16 @@ class DataLoader:
                 parquet_file = (
                     self.config.raw_data_dir / f"{prefix}_{name.lower()}.parquet"
                 )
-                data.to_parquet(parquet_file)
+
+                # Handle both Series and DataFrame for parquet saving
+                if isinstance(data, pd.Series):
+                    # Convert Series to DataFrame for parquet saving
+                    data_df = data.to_frame(name=name)
+                    data_df.to_parquet(parquet_file)
+                else:
+                    # DataFrame can be saved directly
+                    data.to_parquet(parquet_file)
+
                 logger.debug(f"Saved raw data to {parquet_file}")
             except Exception as e:
                 logger.error(f"Error saving raw data for {name}: {e}")
