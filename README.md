@@ -45,12 +45,36 @@ A quantitative portfolio optimization engine designed for institutional asset ma
     - [ ] Incorporate macro factor loading adjustments in scenario generation
     - [ ] Develop dynamic correlation structure based on economic conditions
 
+### 🔹 Phase 3.5: Walk-Forward Back-Testing & Validation
+- [ ] **Rolling/Expanding Window Testing**
+  - [ ] Configurable rebalance cadence (monthly, quarterly, annual)
+  - [ ] Out-of-sample validation with expanding training windows
+  - [ ] Rolling window performance tracking
+- [ ] **Transaction Cost & Turnover Modeling**
+  - [ ] Realistic transaction cost model (basis points)
+  - [ ] Turnover analysis and optimization
+  - [ ] Slippage and market impact modeling
+- [ ] **Benchmark Comparison**
+  - [ ] 60/40 portfolio benchmark
+  - [ ] Equal-weighted portfolio baseline
+  - [ ] Monte Carlo baseline comparison
+  - [ ] Risk-adjusted performance metrics
+- [ ] **CI Validation & Guard Rails**
+  - [ ] Automated back-testing in CI pipeline
+  - [ ] Sharpe ratio and drawdown guard rails
+  - [ ] Performance degradation alerts
+  - [ ] Parameter sensitivity analysis
+
 ### 🔹 Phase 4: Risk Attribution Framework
 - [ ] Use marginal contribution to risk (MCR) or Brinson model
 - [ ] Breakdown:
   - [ ] Asset-level risk
   - [ ] Factor contributions
   - [ ] Macro-linked variance (e.g., via PCA loadings)
+- [ ] **Performance Analytics**
+  - [ ] Use equity curve & weight history from Phase 3.5
+  - [ ] Factor attribution analysis
+  - [ ] Regime-specific performance breakdown
 
 ### 🔹 Phase 5: UI & Deployment
 - [ ] Deploy via Streamlit:
