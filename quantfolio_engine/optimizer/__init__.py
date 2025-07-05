@@ -7,5 +7,12 @@ This module handles portfolio optimization:
 - Constraint optimization
 """
 
-# TODO: Import black_litterman when implemented
-# from . import black_litterman  # noqa: F401
+from .black_litterman import BlackLittermanOptimizer
+from .monte_carlo import MonteCarloOptimizer
+from .portfolio_engine import PortfolioOptimizationEngine
+
+__all__ = [
+    "BlackLittermanOptimizer",
+    "MonteCarloOptimizer",
+    "PortfolioOptimizationEngine",
+]

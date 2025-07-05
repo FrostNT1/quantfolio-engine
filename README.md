@@ -32,13 +32,38 @@ A quantitative portfolio optimization engine designed for institutional asset ma
   - [x] HMMs for regime probabilities
 
 ### 🔹 Phase 3: Portfolio Optimization Engine
-- [ ] Implement Black-Litterman:
-  - [ ] Use empirical covariance matrix
-  - [ ] Encode views via factor-timing outputs (e.g. bullish on momentum)
-  - [ ] Adjust priors based on sentiment scores
-- [ ] Monte Carlo alternative:
-  - [ ] Simulate 1000+ future paths under different macro regimes
-  - [ ] Constrain for max drawdown, volatility, sector allocation
+- [x] Implement Black-Litterman:
+  - [x] Use empirical covariance matrix
+  - [x] Encode views via factor-timing outputs (e.g. bullish on momentum)
+  - [x] Adjust priors based on sentiment scores
+- [x] Monte Carlo alternative:
+  - [x] Simulate 1000+ future paths under different macro regimes
+  - [x] Constrain for max drawdown, volatility, sector allocation
+  - [ ] **Future Enhancement: Macro Conditioning**
+    - [ ] Implement copula-based macro conditioning for Monte Carlo scenarios
+    - [ ] Add regime-specific volatility adjustments based on macro indicators
+    - [ ] Incorporate macro factor loading adjustments in scenario generation
+    - [ ] Develop dynamic correlation structure based on economic conditions
+
+### 🔹 Phase 3.5: Walk-Forward Back-Testing & Validation
+- [ ] **Rolling/Expanding Window Testing**
+  - [ ] Configurable rebalance cadence (monthly, quarterly, annual)
+  - [ ] Out-of-sample validation with expanding training windows
+  - [ ] Rolling window performance tracking
+- [ ] **Transaction Cost & Turnover Modeling**
+  - [ ] Realistic transaction cost model (basis points)
+  - [ ] Turnover analysis and optimization
+  - [ ] Slippage and market impact modeling
+- [ ] **Benchmark Comparison**
+  - [ ] 60/40 portfolio benchmark
+  - [ ] Equal-weighted portfolio baseline
+  - [ ] Monte Carlo baseline comparison
+  - [ ] Risk-adjusted performance metrics
+- [ ] **CI Validation & Guard Rails**
+  - [ ] Automated back-testing in CI pipeline
+  - [ ] Sharpe ratio and drawdown guard rails
+  - [ ] Performance degradation alerts
+  - [ ] Parameter sensitivity analysis
 
 ### 🔹 Phase 4: Risk Attribution Framework
 - [ ] Use marginal contribution to risk (MCR) or Brinson model
@@ -46,6 +71,10 @@ A quantitative portfolio optimization engine designed for institutional asset ma
   - [ ] Asset-level risk
   - [ ] Factor contributions
   - [ ] Macro-linked variance (e.g., via PCA loadings)
+- [ ] **Performance Analytics**
+  - [ ] Use equity curve & weight history from Phase 3.5
+  - [ ] Factor attribution analysis
+  - [ ] Regime-specific performance breakdown
 
 ### 🔹 Phase 5: UI & Deployment
 - [ ] Deploy via Streamlit:
@@ -187,6 +216,95 @@ Decomposition of portfolio risk and return into attributable components for tran
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
+## 🔮 Future Implementation Plans
+
+#### Planned Macro Conditioning Features
+
+##### 1. Copula-Based Macro Conditioning
+```python
+# Future implementation in monte_carlo.py
+def _apply_macro_copula_conditioning(
+    self,
+    scenarios: np.ndarray,
+    macro_data: pd.DataFrame,
+    current_macro_state: pd.Series
+) -> np.ndarray:
+    """
+    Apply copula-based macro conditioning to Monte Carlo scenarios.
+    - Use copula models to capture macro-asset return dependencies
+    - Shift scenario distributions based on current macro environment
+    - Adjust tail risk based on macro stress indicators
+    """
+```
+
+##### 2. Dynamic Volatility Adjustment
+```python
+def _calculate_macro_volatility_adjustment(
+    self,
+    macro_indicators: pd.Series,
+    base_volatility: float
+) -> float:
+    """
+    Adjust volatility based on macro environment.
+    - High inflation → Increase volatility
+    - Low unemployment → Decrease volatility
+    - High VIX → Increase volatility
+    - Economic stress → Increase volatility
+    """
+```
+
+##### 3. Macro Factor Loading Adjustments
+```python
+def _adjust_factor_loadings_for_macro(
+    self,
+    factor_exposures: pd.DataFrame,
+    macro_environment: pd.Series
+) -> pd.DataFrame:
+    """
+    Adjust factor loadings based on macro environment.
+    - Recession: Increase defensive factor weights
+    - Expansion: Increase growth factor weights
+    - High rates: Increase value factor weights
+    - Low rates: Increase momentum factor weights
+    """
+```
+
+##### 4. Dynamic Correlation Structure
+```python
+def _calculate_macro_conditioned_correlation(
+    self,
+    base_correlation: np.ndarray,
+    macro_stress_level: float,
+    economic_regime: str
+) -> np.ndarray:
+    """
+    Adjust correlation matrix based on macro conditions.
+    - Crisis periods: Increase correlations (flight to quality)
+    - Expansion periods: Decrease correlations (diversification)
+    - High stress: Increase defensive asset correlations
+    """
+```
+
+#### Implementation Priority
+1. **Phase 1**: Implement basic macro volatility adjustments
+2. **Phase 2**: Add copula-based scenario conditioning
+3. **Phase 3**: Develop dynamic factor loading adjustments
+4. **Phase 4**: Implement full dynamic correlation structure
+
+#### Expected Benefits
+- **Enhanced Risk Modeling**: More accurate tail risk estimation
+- **Better Regime Transitions**: Smoother transitions between market states
+- **Improved Diversification**: Dynamic correlation adjustments
+- **Macro-Aware Optimization**: Portfolio weights that respond to economic conditions
+
+#### Technical Considerations
+- **Performance**: Copula calculations can be computationally intensive
+- **Data Requirements**: Need high-quality macro data with sufficient history
+- **Model Complexity**: Balance between sophistication and interpretability
+- **Backtesting**: Extensive validation required for macro conditioning features
+
+---
+
 ## 📄 License
 
 This project is licensed under the BSD License - see the [LICENSE](LICENSE) file for details.
@@ -196,3 +314,14 @@ This project is licensed under the BSD License - see the [LICENSE](LICENSE) file
 - Built on the [Cookiecutter Data Science](https://drivendata.github.io/cookiecutter-data-science/) template
 - Inspired by institutional quantitative workflows
 - Leverages modern Python data science ecosystem
+
+## Phase 3: Black-Litterman Troubleshooting & Tuning
+
+| Symptom                                                                   | Why it matters                                                                                      | Quick checks & tweaks                                                                                                                                  |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Sharpe only ≈ 0.18** after views                                        | That's still thin excess return for 10 % vol.                                                       | ① Bump `lambda_range` to, say, `(1, 10)` and finer grid. ② Try lower `γ` (grand-view blend) — it drags π toward the mean and can dilute richer assets. |
+| **View strength fixed at 3× multiplier**                                  | May be too timid once λ rises.                                                                      | Pass `view_strength=self.bl_view_strength` from engine into `create_factor_timing_views`. Try 2 – 4 and compare.                                      |
+| **Regime = 0 every time**                                                 | Your HMM may be stuck in one state or the dates aren't lining up, so multiplier 2.0 is always used. | Inspect the last row of `factor_regimes` — if it never changes you're not getting regime diversification.                                              |
+| **Weights hit the hard cap 20 %** (TLT, GLD, WMT)                         | Caps are binding. Portfolio could want >20 % in other assets but can't.                             | Decide if 20 % is a design choice or temporary.                                                                                                        |
+| **VaR (95 %) –3.6 % monthly**                                             | Reasonable, but check if that's dominated by one asset class (GLD? TLT?).                           | Run `analyze_portfolio_risk()` to see asset-level contributions.                                                                                       |
+| **Warnings about "no common dates between factor exposures and regimes"** | Means views are built without regime context when those indices diverge.                            | Align dates earlier or fill forward regime labels.                                                                                                     |

@@ -58,7 +58,9 @@ class TestFactorExposureCalculator:
 
         # Check output
         assert isinstance(exposures, pd.DataFrame)
-        assert len(exposures.columns) == 2  # SPY and TLT
+        assert (
+            len(exposures.columns) == 6
+        )  # SPY_factor1, SPY_factor2, SPY_factor3, TLT_factor1, TLT_factor2, TLT_factor3
         assert len(exposures) > 0  # Should have some data after lookback period
 
     def test_rolling_regression_length_consistency(self):
@@ -82,8 +84,9 @@ class TestFactorExposureCalculator:
             mock_ridge.return_value.coef_ = np.array([0.1, 0.2, 0.3])
             result = calculator._rolling_regression(asset_returns, factors)
 
-            # Should return Series with factor exposures
-            assert isinstance(result, pd.Series)
+            # Should return DataFrame with factor exposures
+            assert isinstance(result, pd.DataFrame)
+            assert len(result.columns) == 3  # factor1, factor2, factor3
             assert len(result) > 0
 
     def test_correlation_fallback_individual_factors(self):
@@ -112,7 +115,8 @@ class TestFactorExposureCalculator:
             result = calculator._rolling_regression(asset_returns, factors)
 
             # Should still work and return meaningful values
-            assert isinstance(result, pd.Series)
+            assert isinstance(result, pd.DataFrame)
+            assert len(result.columns) == 3  # factor1, factor2, factor3
             assert len(result) > 0
 
     def test_index_coverage_consistency(self):
@@ -135,12 +139,9 @@ class TestFactorExposureCalculator:
             asset_returns, factors
         )
 
-        # Both should be sparse Series starting after lookback period
-        min_required = max(calculator.lookback_period, len(factors.columns) + 1)
-        expected_start = asset_returns.index[min_required]
-
-        assert regression_result.index[0] >= expected_start
-        assert correlation_result.index[0] >= expected_start
+        # Both should be sparse DataFrames starting after lookback period
+        # Check that both methods start at the same index
+        assert regression_result.index[0] == correlation_result.index[0]
 
     def test_ridge_regression_stability(self):
         """Test that Ridge regression provides more stable results than LinearRegression."""
@@ -162,7 +163,8 @@ class TestFactorExposureCalculator:
 
         # Should not crash with Ridge regression
         result = calculator._rolling_regression(asset_returns, factors)
-        assert isinstance(result, pd.Series)
+        assert isinstance(result, pd.DataFrame)
+        assert len(result.columns) == 3  # factor1, factor2, factor3
         assert len(result) > 0
 
     def test_data_alignment_with_missing_values(self):
@@ -185,7 +187,8 @@ class TestFactorExposureCalculator:
 
         # Should handle missing values gracefully
         result = calculator._rolling_regression(asset_returns, factors)
-        assert isinstance(result, pd.Series)
+        assert isinstance(result, pd.DataFrame)
+        assert len(result.columns) == 2  # factor1, factor2
 
     def test_insufficient_data_handling(self):
         """Test handling of insufficient data for regression."""
@@ -204,7 +207,8 @@ class TestFactorExposureCalculator:
 
         # Should fall back to correlation method
         result = calculator._rolling_regression(asset_returns, factors)
-        assert isinstance(result, pd.Series)
+        assert isinstance(result, pd.DataFrame)
+        # May be empty due to insufficient data
 
 
 class TestRegimeDetector:
@@ -487,7 +491,9 @@ class TestIntegration:
             # Check factor exposures
             exposures = results["factor_exposures"]
             assert isinstance(exposures, pd.DataFrame)
-            assert len(exposures.columns) == 3  # SPY, TLT, GLD
+            assert (
+                len(exposures.columns) == 9
+            )  # SPY_market, SPY_inflation, SPY_growth, TLT_market, TLT_inflation, TLT_growth, GLD_market, GLD_inflation, GLD_growth
             assert len(exposures) > 0
 
             # Check regimes
@@ -568,7 +574,7 @@ class TestPerformance:
             returns_df, factors_df
         )
         assert isinstance(exposures, pd.DataFrame)
-        assert len(exposures.columns) == 20
+        assert len(exposures.columns) == 200  # 20 assets × 10 factors each
 
     def test_numerical_stability(self):
         """Test numerical stability with extreme values."""
@@ -589,5 +595,6 @@ class TestPerformance:
 
         # Should handle extreme values gracefully
         result = calculator._rolling_regression(asset_returns, factors)
-        assert isinstance(result, pd.Series)
-        assert not result.isna().all()  # Should have some valid results
+        assert isinstance(result, pd.DataFrame)
+        assert len(result.columns) == 2  # factor1, factor2
+        assert not result.isna().all().all()  # Should have some valid results

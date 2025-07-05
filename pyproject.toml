@@ -62,6 +62,7 @@ dependencies = [
     "alphalens>=0.4.0",
     "pyfolio>=0.9.2",
     "hmmlearn>=0.3.3",
+    "ecos==2.0.14"
 ]
 requires-python = ">=3.11"
 
