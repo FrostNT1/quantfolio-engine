@@ -10,9 +10,48 @@ A quantitative portfolio optimization engine designed for institutional asset ma
 
 ## 🎯 Target Audience
 - Institutional quantitative teams
-- Hedge fund portfolio managers  
+- Hedge fund portfolio managers
 - Smart-beta product managers
 - Asset management firms (AllianceBernstein, BlackRock, etc.)
+
+## 🚀 Development Roadmap
+
+### 🔹 Phase 1: Data Ingestion & Preprocessing
+- [x] Fetch historical prices for 30–100 assets (e.g. S&P 500 subset, ETFs)
+- [x] Retrieve 5–10 macro indicators from FRED or equivalent
+- [x] Load static or dynamic sentiment scores for corresponding timeframes
+    - ⚠️ Note: Sentiment score is currently placeholder/random. Replace with live data from a real API (e.g., News API, RavenPack) in this phase.
+- [x] Normalize all data (e.g., Z-scores, rolling %change)
+    - Normalization implemented for returns, macro, and sentiment data.
+
+### 🔹 Phase 2: Factor Timing Signal Builder
+- [ ] Calculate factor exposures using regression (Fama-French 3 or 5 factor model)
+- [ ] Detect factor regimes using:
+  - [ ] Rolling means / volatilities
+  - [ ] Clustering methods (e.g. k-means, DBSCAN)
+  - [ ] HMMs for regime probabilities
+
+### 🔹 Phase 3: Portfolio Optimization Engine
+- [ ] Implement Black-Litterman:
+  - [ ] Use empirical covariance matrix
+  - [ ] Encode views via factor-timing outputs (e.g. bullish on momentum)
+  - [ ] Adjust priors based on sentiment scores
+- [ ] Monte Carlo alternative:
+  - [ ] Simulate 1000+ future paths under different macro regimes
+  - [ ] Constrain for max drawdown, volatility, sector allocation
+
+### 🔹 Phase 4: Risk Attribution Framework
+- [ ] Use marginal contribution to risk (MCR) or Brinson model
+- [ ] Breakdown:
+  - [ ] Asset-level risk
+  - [ ] Factor contributions
+  - [ ] Macro-linked variance (e.g., via PCA loadings)
+
+### 🔹 Phase 5: UI & Deployment
+- [ ] Deploy via Streamlit:
+  - [ ] Input views, rebalancing frequency
+  - [ ] Output recommended portfolio, expected return, CVaR
+  - [ ] Plot attribution summaries
 
 ## 🚀 MVP Features
 
@@ -96,7 +135,7 @@ quantfolio-engine/
 ### Installation
 ```bash
 # Clone the repository
-git clone https://github.com/FrostNT1/quantfolio-engine.git
+git clone https://github.com/yourusername/quantfolio-engine.git
 cd quantfolio-engine
 
 # Create environment

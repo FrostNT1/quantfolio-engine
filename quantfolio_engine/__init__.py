@@ -12,11 +12,9 @@ __author__ = "Shivam Tyagi"
 from quantfolio_engine import config  # noqa: F401
 
 # Import main modules for easy access
-try:
-    from quantfolio_engine.data import data_loader  # noqa: F401
-    from quantfolio_engine.signals import factor_timing  # noqa: F401
-    from quantfolio_engine.optimizer import black_litterman  # noqa: F401
-    from quantfolio_engine.attribution import risk_attribution  # noqa: F401
-except ImportError:
-    # Modules may not be implemented yet
-    pass
+# TODO: Uncomment imports when modules are implemented
+# from quantfolio_engine.attribution import risk_attribution  # noqa: F401
+from quantfolio_engine.data import data_loader  # noqa: F401
+
+# from quantfolio_engine.optimizer import black_litterman  # noqa: F401
+# from quantfolio_engine.signals import factor_timing  # noqa: F401

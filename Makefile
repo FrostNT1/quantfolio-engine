@@ -50,13 +50,13 @@ test-cov:
 .PHONY: sync_data_down
 sync_data_down:
 	aws s3 sync s3://bucket-name/data/ \
-		data/ 
+		data/
 
 ## Upload Data to storage system
 .PHONY: sync_data_up
 sync_data_up:
 	aws s3 sync data/ \
-		s3://bucket-name/data 
+		s3://bucket-name/data
 
 ## Set up Python interpreter environment
 .PHONY: create_environment
@@ -67,7 +67,35 @@ create_environment:
 ## Load data pipeline
 .PHONY: data
 data: requirements
-	$(PYTHON_INTERPRETER) -m quantfolio_engine.data.data_loader
+	quantfolio fetch-data
+
+## Fetch specific data types
+.PHONY: data-returns
+data-returns: requirements
+	quantfolio fetch-data --type returns
+
+.PHONY: data-macro
+data-macro: requirements
+	quantfolio fetch-data --type macro
+
+.PHONY: data-sentiment
+data-sentiment: requirements
+	quantfolio fetch-data --type sentiment
+
+## List available data
+.PHONY: list-data
+list-data: requirements
+	quantfolio list-data
+
+## Show system status
+.PHONY: status
+status: requirements
+	quantfolio status
+
+## Validate data quality
+.PHONY: validate-data
+validate-data: requirements
+	quantfolio validate-data
 
 ## Generate factor timing signals
 .PHONY: signals
