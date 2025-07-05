@@ -84,6 +84,11 @@ class DataLoader:
                     # Save raw data if requested
                     if save_raw:
                         raw_file = RAW_DATA_DIR / f"prices_{ticker.lower()}.csv"
+                        if (
+                            hasattr(ticker_data.index, "tz")
+                            and ticker_data.index.tz is not None
+                        ):
+                            ticker_data.index = ticker_data.index.tz_localize(None)
                         ticker_data.to_csv(raw_file)
                         logger.info(f"Saved raw data to {raw_file}")
 
@@ -97,6 +102,8 @@ class DataLoader:
 
         # Save processed data
         processed_file = PROCESSED_DATA_DIR / "returns_monthly.csv"
+        if hasattr(returns_df.index, "tz") and returns_df.index.tz is not None:
+            returns_df.index = returns_df.index.tz_localize(None)
         returns_df.to_csv(processed_file)
         logger.info(f"Saved processed returns to {processed_file}")
 
@@ -154,6 +161,8 @@ class DataLoader:
                         # Save raw data if requested
                         if save_raw:
                             raw_file = RAW_DATA_DIR / f"macro_{series_id.lower()}.csv"
+                            if hasattr(data.index, "tz") and data.index.tz is not None:
+                                data.index = data.index.tz_localize(None)
                             data.to_csv(raw_file)
                             logger.info(f"Saved raw data to {raw_file}")
 
@@ -174,6 +183,8 @@ class DataLoader:
 
                 if save_raw:
                     raw_file = RAW_DATA_DIR / "macro_vix.csv"
+                    if hasattr(vix_data.index, "tz") and vix_data.index.tz is not None:
+                        vix_data.index = vix_data.index.tz_localize(None)
                     vix_data.to_csv(raw_file)
                     logger.info(f"Saved raw VIX data to {raw_file}")
         except Exception as e:
@@ -185,6 +196,8 @@ class DataLoader:
 
         # Save processed data
         processed_file = PROCESSED_DATA_DIR / "macro_monthly.csv"
+        if hasattr(macro_df.index, "tz") and macro_df.index.tz is not None:
+            macro_df.index = macro_df.index.tz_localize(None)
         macro_df.to_csv(processed_file)
         logger.info(f"Saved processed macro data to {processed_file}")
 
@@ -236,6 +249,13 @@ class DataLoader:
 
                     if save_raw:
                         raw_file = RAW_DATA_DIR / f"sentiment_{entity.lower()}.csv"
+                        if (
+                            hasattr(entity_sentiment.index, "tz")
+                            and entity_sentiment.index.tz is not None
+                        ):
+                            entity_sentiment.index = entity_sentiment.index.tz_localize(
+                                None
+                            )
                         entity_sentiment.to_csv(raw_file)
                         logger.info(f"Saved raw sentiment data to {raw_file}")
 
@@ -258,6 +278,13 @@ class DataLoader:
                             RAW_DATA_DIR
                             / f"sentiment_{topic.replace(' ', '_').lower()}.csv"
                         )
+                        if (
+                            hasattr(topic_sentiment.index, "tz")
+                            and topic_sentiment.index.tz is not None
+                        ):
+                            topic_sentiment.index = topic_sentiment.index.tz_localize(
+                                None
+                            )
                         topic_sentiment.to_csv(raw_file)
                         logger.info(f"Saved raw sentiment data to {raw_file}")
 
@@ -271,6 +298,8 @@ class DataLoader:
 
         # Save processed data
         processed_file = PROCESSED_DATA_DIR / "sentiment_monthly.csv"
+        if hasattr(sentiment_df.index, "tz") and sentiment_df.index.tz is not None:
+            sentiment_df.index = sentiment_df.index.tz_localize(None)
         sentiment_df.to_csv(processed_file)
         logger.info(f"Saved processed sentiment data to {processed_file}")
 

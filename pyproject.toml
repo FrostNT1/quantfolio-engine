@@ -61,6 +61,7 @@ dependencies = [
     "empyrical>=0.5.0",
     "alphalens>=0.4.0",
     "pyfolio>=0.9.2",
+    "hmmlearn>=0.3.3",
 ]
 requires-python = ">=3.11"
 

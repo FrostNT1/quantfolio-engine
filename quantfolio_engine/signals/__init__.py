@@ -7,5 +7,4 @@ This module handles factor timing and signal generation:
 - Sentiment signal processing
 """
 
-# TODO: Import factor_timing when implemented
-# from . import factor_timing  # noqa: F401
+from . import factor_timing  # noqa: F401
