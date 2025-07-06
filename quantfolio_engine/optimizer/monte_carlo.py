@@ -35,6 +35,7 @@ class MonteCarloOptimizer:
         confidence_level: float = 0.95,
         risk_aversion: float = 3.07,  # Interpreted as annual risk aversion (not monthly)
         use_cvar: bool = True,
+        time_basis: str = "monthly",  # Time basis for all calculations
         random_state: Optional[int] = None,
     ):
         """
@@ -57,6 +58,17 @@ class MonteCarloOptimizer:
         self.confidence_level = confidence_level
         self.risk_aversion = risk_aversion  # Annual risk aversion
         self.use_cvar = use_cvar
+        self.time_basis = time_basis
+
+        # Standardize risk-free rate to time basis
+        if time_basis == "monthly":
+            self.rf_monthly = risk_free_rate / 12
+            self.rf_annual = risk_free_rate
+        elif time_basis == "annual":
+            self.rf_monthly = risk_free_rate / 12
+            self.rf_annual = risk_free_rate
+        else:
+            raise ValueError("time_basis must be 'monthly' or 'annual'")
 
         # Use local RNG for thread safety and reproducibility
         self.rng = np.random.default_rng(random_state)
@@ -166,7 +178,7 @@ class MonteCarloOptimizer:
             constraints_list.append(
                 cp.quad_form(w, annualized_cov) <= max_volatility**2
             )
-        # CVaR constraint (not drawdown)
+        # CVaR constraint on terminal wealth (not mean path loss)
         if self.use_cvar and self.max_cvar_loss is not None:
             N = scenarios.shape[0]
             if N > 5000:
@@ -178,8 +190,11 @@ class MonteCarloOptimizer:
                 N = 5000
             else:
                 scenarios_small = scenarios
-            scenario_returns = np.mean(scenarios_small, axis=1)
-            losses = -scenario_returns @ w
+
+            # Calculate terminal wealth for each scenario
+            # Shape: (n_scenarios, n_assets) - cumulative returns over time horizon
+            terminal_returns = np.prod(1 + scenarios_small, axis=1) - 1
+            losses = -terminal_returns @ w  # Portfolio terminal losses
             alpha = self.confidence_level
             t = cp.Variable()
             z = cp.Variable(N)

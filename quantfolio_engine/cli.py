@@ -509,6 +509,7 @@ def optimize_portfolio(
     import json
     from pathlib import Path
 
+    import numpy as np
     import pandas as pd
 
     from .optimizer.portfolio_engine import PortfolioOptimizationEngine
@@ -590,10 +591,10 @@ def optimize_portfolio(
 
             # Save frontier results
             if save_results:
-                output_dir = Path(output_dir) if output_dir else Path("reports")
-                output_dir.mkdir(exist_ok=True)
+                output_path = Path(output_dir) if output_dir else Path("reports")
+                output_path.mkdir(exist_ok=True)
 
-                frontier_file = output_dir / "efficient_frontier.csv"
+                frontier_file = output_path / "efficient_frontier.csv"
                 frontier_df = pd.DataFrame(
                     {
                         "return": frontier["returns"],
@@ -604,7 +605,7 @@ def optimize_portfolio(
                 logger.success(f"Saved efficient frontier to {frontier_file}")
 
                 # Save weights for each point
-                weights_file = output_dir / "frontier_weights.csv"
+                weights_file = output_path / "frontier_weights.csv"
                 weights_df = pd.DataFrame(frontier["weights"])
                 weights_df.to_csv(weights_file)
                 logger.success(f"Saved frontier weights to {weights_file}")
@@ -644,22 +645,56 @@ def optimize_portfolio(
             # Display top weights
             weights = results["weights"]
             logger.info("\nTop 5 Asset Weights:")
-            top_weights = weights.nlargest(5)
-            for asset, weight in top_weights.items():
-                logger.info(f"  {asset}: {weight:.3f}")
+
+            # Handle both pandas Series and numpy array weights
+            if isinstance(weights, pd.Series):
+                top_weights = weights.nlargest(5)
+                for asset, weight in top_weights.items():
+                    logger.info(f"  {asset}: {weight:.3f}")
+            elif isinstance(weights, np.ndarray):
+                # For numpy arrays, we need asset names and weights
+                asset_names = list(data["returns"].columns)
+                if len(asset_names) == len(weights):
+                    # Create a Series for easier handling
+                    weights_series = pd.Series(weights, index=asset_names)
+                    top_weights = weights_series.nlargest(5)
+                    for asset, weight in top_weights.items():
+                        logger.info(f"  {asset}: {weight:.3f}")
+                else:
+                    logger.warning("Asset names and weights have different lengths")
+            else:
+                logger.warning(f"Unexpected weights type: {type(weights)}")
 
             # Save results
             if save_results:
-                output_dir = Path(output_dir) if output_dir else Path("reports")
-                output_dir.mkdir(exist_ok=True)
+                output_path = Path(output_dir) if output_dir else Path("reports")
+                output_path.mkdir(exist_ok=True)
 
                 # Save weights
-                weights_file = output_dir / "optimal_weights.csv"
-                weights.to_csv(weights_file)
+                weights_file = output_path / "optimal_weights.csv"
+                if isinstance(weights, pd.Series):
+                    weights.to_csv(weights_file)
+                elif isinstance(weights, np.ndarray):
+                    # For numpy arrays, create a DataFrame with asset names
+                    asset_names = list(data["returns"].columns)
+                    if len(asset_names) == len(weights):
+                        weights_df = pd.DataFrame(
+                            {"asset": asset_names, "weight": weights}
+                        )
+                        weights_df.to_csv(weights_file, index=False)
+                    else:
+                        # Fallback: save as numpy array
+                        np.save(weights_file.with_suffix(".npy"), weights)
+                        logger.warning(
+                            f"Saved weights as numpy array to {weights_file.with_suffix('.npy')}"
+                        )
+                else:
+                    logger.warning(f"Cannot save weights of type {type(weights)}")
+                    return
                 logger.success(f"Saved optimal weights to {weights_file}")
 
                 # Save summary
-                summary_file = output_dir / "optimization_summary.txt"
+                summary_file = output_path / "optimization_summary.txt"
                 with open(summary_file, "w") as f:
                     f.write("Portfolio Optimization Summary\n")
                     f.write("=" * 50 + "\n")

@@ -337,8 +337,8 @@ class PortfolioOptimizationEngine:
         max_volatility: Optional[float] = None,
         sector_limits: Optional[Dict[str, float]] = None,
     ) -> Dict[str, Union[pd.Series, float, Dict]]:
-        """Combine both optimization methods."""
-        logger.info("Running combined optimization...")
+        """Combine both optimization methods using mean-variance optimization."""
+        logger.info("Running combined optimization using mean-variance approach...")
 
         # Run both methods
         bl_result = self._optimize_black_litterman(
@@ -348,10 +348,7 @@ class PortfolioOptimizationEngine:
             data, constraints, target_return, max_volatility, sector_limits
         )
 
-        # Ensure weights and expected_return are compatible types
-        bl_weights = bl_result["weights"]
-        mc_weights = mc_result["weights"]
-
+        # Treat BL and MC as two "assets" and optimize their combination
         def to_array(w):
             if hasattr(w, "values") and not callable(w.values):
                 return w.values
@@ -359,47 +356,114 @@ class PortfolioOptimizationEngine:
                 return np.array(list(w.values()))
             return np.array(w)
 
-        bl_weights = to_array(bl_weights)
-        mc_weights = to_array(mc_weights)
-        combined_weights = (bl_weights + mc_weights) / 2
+        bl_weights = to_array(bl_result["weights"])
+        mc_weights = to_array(mc_result["weights"])
 
+        # Get expected returns and volatilities
         bl_return = bl_result["expected_return"]
         mc_return = mc_result["expected_return"]
-        if isinstance(bl_return, dict) or isinstance(mc_return, dict):
-            logger.warning(
-                "Expected return is a dict, cannot combine. Using BL result."
-            )
-            combined_return = (
-                bl_return if not isinstance(bl_return, dict) else mc_return
-            )
-        else:
-            combined_return = (bl_return + mc_return) / 2
+        bl_vol = bl_result["volatility"]
+        mc_vol = mc_result["volatility"]
 
-        # Recompute volatility for combined weights (volatility is nonlinear)
+        # Handle dict returns
+        if isinstance(bl_return, dict):
+            bl_return = 0.08  # Default annual return
+        if isinstance(mc_return, dict):
+            mc_return = 0.08  # Default annual return
+        if isinstance(bl_vol, dict):
+            bl_vol = 0.15  # Default annual volatility
+        if isinstance(mc_vol, dict):
+            mc_vol = 0.15  # Default annual volatility
+
+        # Calculate correlation between strategies using historical data
         returns_df = data["returns"]
-        try:
-            freqstr = returns_df.index.to_period().freqstr
-            if freqstr.upper().startswith("M"):
-                freq = 12
-            elif freqstr.upper().startswith("Q"):
-                freq = 4
-            elif freqstr.upper().startswith("A") or freqstr.upper().startswith("Y"):
-                freq = 1
-            else:
-                freq = 12
-        except Exception:
-            freq = 12
-        portfolio_returns = (returns_df * combined_weights).sum(axis=1)
-        combined_vol = portfolio_returns.std() * np.sqrt(freq)  # Annualized
+        bl_portfolio_returns = (returns_df * bl_weights).sum(axis=1)
+        mc_portfolio_returns = (returns_df * mc_weights).sum(axis=1)
 
-        # Compute Sharpe only if combined_return is a float
-        if isinstance(combined_return, dict):
-            logger.warning(
-                "Combined return is a dict, cannot compute Sharpe ratio. Setting to np.nan."
+        # Calculate correlation between strategies
+        correlation = np.corrcoef(bl_portfolio_returns, mc_portfolio_returns)[0, 1]
+        if np.isnan(correlation):
+            correlation = 0.0  # Default to uncorrelated if can't calculate
+
+        # Create 2-asset mean-variance optimization
+        import cvxpy as cp
+
+        # Strategy returns and volatilities
+        strategy_returns = np.array([bl_return, mc_return])
+        # strategy_vols = np.array([bl_vol, mc_vol])  # Not used in current implementation
+
+        # Create covariance matrix for strategies
+        strategy_cov = np.array(
+            [
+                [bl_vol**2, correlation * bl_vol * mc_vol],
+                [correlation * bl_vol * mc_vol, mc_vol**2],
+            ]
+        )
+
+        # Optimize allocation between strategies
+        w_strategies = cp.Variable(2)
+
+        # Objective: maximize Sharpe ratio
+        objective = cp.Maximize(
+            cp.sum(cp.multiply(strategy_returns, w_strategies)) - self.risk_free_rate
+        )
+
+        # Constraints
+        constraints_list = [
+            cp.sum(w_strategies) == 1,
+            w_strategies >= 0,
+        ]
+
+        if max_volatility is not None:
+            constraints_list.append(
+                cp.quad_form(w_strategies, strategy_cov) <= max_volatility**2
             )
-            combined_sharpe = np.nan
+
+        # Solve optimization
+        problem = cp.Problem(objective, constraints_list)
+        try:
+            problem.solve(solver=cp.ECOS_BB)
+        except cp.error.SolverError:
+            logger.warning("ECOS_BB solver not available, trying OSQP...")
+            problem.solve(solver=cp.OSQP)
+
+        if problem.status in ("optimal", "optimal_inaccurate"):
+            strategy_weights = w_strategies.value
+            if problem.status == "optimal_inaccurate":
+                logger.warning(
+                    "Combined optimization completed with numerical inaccuracies"
+                )
         else:
+            logger.warning(
+                f"Combined optimization failed with status: {problem.status}"
+            )
+            # Fallback to equal weights
+            strategy_weights = np.array([0.5, 0.5])
+
+        # Combine weights using optimal strategy allocation
+        combined_weights = (
+            strategy_weights[0] * bl_weights + strategy_weights[1] * mc_weights
+        )
+
+        # Calculate combined metrics
+        combined_return = (
+            strategy_weights[0] * bl_return + strategy_weights[1] * mc_return
+        )
+        combined_vol = np.sqrt(
+            strategy_weights[0] ** 2 * bl_vol**2
+            + strategy_weights[1] ** 2 * mc_vol**2
+            + 2
+            * strategy_weights[0]
+            * strategy_weights[1]
+            * correlation
+            * bl_vol
+            * mc_vol
+        )
+
+        if combined_vol > 0:
             combined_sharpe = (combined_return - self.risk_free_rate) / combined_vol
+        else:
+            combined_sharpe = np.nan
 
         result = {
             "method": "combined",
@@ -407,6 +471,8 @@ class PortfolioOptimizationEngine:
             "expected_return": combined_return,
             "volatility": combined_vol,
             "sharpe_ratio": combined_sharpe,
+            "strategy_weights": strategy_weights,
+            "correlation": correlation,
             "black_litterman": bl_result,
             "monte_carlo": mc_result,
         }

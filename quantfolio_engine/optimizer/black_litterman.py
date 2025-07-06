@@ -32,6 +32,7 @@ class BlackLittermanOptimizer:
         market_cap_weight: Optional[Dict[str, float]] = None,
         tau: float = 0.05,
         lambda_mkt: float = 0.25,  # Market risk aversion parameter (scaled for monthly Σ)
+        time_basis: str = "monthly",  # Time basis for all calculations
     ):
         """
         Initialize Black-Litterman optimizer.
@@ -46,6 +47,17 @@ class BlackLittermanOptimizer:
         self.tau = tau
         self.lambda_mkt = lambda_mkt
         self.grand_view_gamma = 0.0  # Grand view blend parameter
+        self.time_basis = time_basis
+
+        # Standardize risk-free rate to time basis
+        if time_basis == "monthly":
+            self.rf_monthly = risk_free_rate / 12
+            self.rf_annual = risk_free_rate
+        elif time_basis == "annual":
+            self.rf_monthly = risk_free_rate / 12
+            self.rf_annual = risk_free_rate
+        else:
+            raise ValueError("time_basis must be 'monthly' or 'annual'")
 
         # Set default market cap weights if not provided
         if market_cap_weight is None:
@@ -163,6 +175,125 @@ class BlackLittermanOptimizer:
 
         return equilibrium_returns
 
+    def _calculate_information_coefficients(
+        self,
+        factor_exposures: pd.DataFrame,
+        returns_df: pd.DataFrame,
+        lookback_periods: int = 12,
+    ) -> Dict[str, float]:
+        """
+        Calculate Information Coefficients (IC) for factor timing views.
+
+        IC measures the correlation between factor exposures and forward returns.
+        Higher IC indicates more predictive power for factor timing.
+
+        Args:
+            factor_exposures: Asset factor exposures (with MultiIndex date, asset)
+            returns_df: Asset returns
+            lookback_periods: Number of periods for IC calculation
+
+        Returns:
+            Dictionary mapping factor names to their IC values
+        """
+        ic_values = {}
+
+        # Handle MultiIndex structure of factor exposures
+        if isinstance(factor_exposures.index, pd.MultiIndex):
+            # Factor exposures has MultiIndex (date, asset)
+            # We need to process each factor separately
+            factor_columns = [
+                col for col in factor_exposures.columns if col not in ["date", "asset"]
+            ]
+
+            for factor_col in factor_columns:
+                try:
+                    # Pivot the data for this specific factor
+                    factor_data = factor_exposures.reset_index()
+                    exposures_pivot = factor_data.pivot(
+                        index="date", columns="asset", values=factor_col
+                    )
+
+                    # Align with returns data
+                    common_dates = exposures_pivot.index.intersection(returns_df.index)
+                    if len(common_dates) < lookback_periods + 1:
+                        logger.debug(
+                            f"Insufficient data for IC calculation of {factor_col}: {len(common_dates)} periods"
+                        )
+                        continue
+
+                    exposures_aligned = exposures_pivot.loc[common_dates]
+                    returns_aligned = returns_df.loc[common_dates]
+
+                    # Calculate rolling correlation between factor exposure and forward returns
+                    correlations = []
+                    for i in range(lookback_periods, len(common_dates)):
+                        # Current factor exposure
+                        current_exposure = exposures_aligned.iloc[i]
+
+                        # Forward returns (next period)
+                        if i + 1 < len(common_dates):
+                            forward_returns = returns_aligned.iloc[i + 1]
+
+                            # Ensure data is numeric
+                            try:
+                                current_exposure_numeric = pd.to_numeric(
+                                    current_exposure, errors="coerce"
+                                )
+                                forward_returns_numeric = pd.to_numeric(
+                                    forward_returns, errors="coerce"
+                                )
+
+                                # Check for valid data
+                                if (
+                                    not current_exposure_numeric.isna().all()
+                                    and not forward_returns_numeric.isna().all()
+                                ):
+                                    # Remove NaN values
+                                    valid_mask = ~(
+                                        current_exposure_numeric.isna()
+                                        | forward_returns_numeric.isna()
+                                    )
+                                    if (
+                                        valid_mask.sum() > 1
+                                    ):  # Need at least 2 points for correlation
+                                        # Extract values for correlation calculation
+                                        exposure_values = current_exposure_numeric[
+                                            valid_mask
+                                        ].values
+                                        returns_values = forward_returns_numeric[
+                                            valid_mask
+                                        ].values
+
+                                        if (
+                                            len(exposure_values) > 1
+                                            and len(returns_values) > 1
+                                        ):
+                                            corr = np.corrcoef(
+                                                exposure_values, returns_values
+                                            )[0, 1]
+                                            if not np.isnan(corr):
+                                                correlations.append(corr)
+                            except (ValueError, TypeError) as e:
+                                logger.debug(
+                                    f"Error calculating correlation for {factor_col}: {e}"
+                                )
+                                continue
+
+                    if correlations:
+                        ic_values[factor_col] = np.mean(correlations)
+                        logger.debug(
+                            f"IC for {factor_col}: {ic_values[factor_col]:.4f}"
+                        )
+
+                except Exception as e:
+                    logger.debug(f"Error processing factor {factor_col}: {e}")
+                    continue
+        else:
+            # Handle non-MultiIndex case (fallback)
+            logger.warning("Factor exposures does not have MultiIndex structure")
+
+        return ic_values
+
     def create_factor_timing_views(
         self,
         factor_exposures: pd.DataFrame,
@@ -184,6 +315,11 @@ class BlackLittermanOptimizer:
             Tuple of (P, Q, Omega) matrices for Black-Litterman
         """
         logger.info("Creating factor timing views...")
+
+        # Calculate Information Coefficients for factor timing
+        ic_values = self._calculate_information_coefficients(
+            factor_exposures, returns_df
+        )
 
         # Align data
         common_dates = factor_exposures.index.intersection(factor_regimes.index)
@@ -291,12 +427,18 @@ class BlackLittermanOptimizer:
                             p_row[assets.index(low_asset)] = -1
 
                             views.append(p_row)
-                            # Scale return by average exposure magnitude for this factor
+                            # Scale return using Information Coefficient and factor volatility
+                            factor_name = "CPIAUCSL"
+                            ic_value = ic_values.get(
+                                factor_name, 0.1
+                            )  # Default IC if not available
                             avg_exposure = abs(cpi_exposures.mean())
-                            # Use more meaningful monthly returns (1-2% range)
-                            scaled_return = (
-                                0.015 * regime_multiplier * max(avg_exposure, 0.01)
-                            )
+
+                            # IC-based scaling: higher IC = stronger views
+                            # Base monthly return: 1% with IC adjustment
+                            base_return = 0.01 * abs(ic_value) * regime_multiplier
+                            scaled_return = base_return * max(avg_exposure, 0.01)
+
                             view_returns.append(adjusted_view_strength * scaled_return)
                             view_uncertainties.append(
                                 0.5 * abs(adjusted_view_strength * scaled_return)
@@ -331,12 +473,18 @@ class BlackLittermanOptimizer:
                             p_row[assets.index(low_asset)] = -1
 
                             views.append(p_row)
-                            # Scale return by average exposure magnitude for this factor
+                            # Scale return using Information Coefficient and factor volatility
+                            factor_name = "FEDFUNDS"
+                            ic_value = ic_values.get(
+                                factor_name, 0.1
+                            )  # Default IC if not available
                             avg_exposure = abs(rate_exposures.mean())
-                            # Use more meaningful monthly returns (1-2% range)
-                            scaled_return = (
-                                0.012 * regime_multiplier * max(avg_exposure, 0.01)
-                            )
+
+                            # IC-based scaling: higher IC = stronger views
+                            # Base monthly return: 1% with IC adjustment
+                            base_return = 0.01 * abs(ic_value) * regime_multiplier
+                            scaled_return = base_return * max(avg_exposure, 0.01)
+
                             view_returns.append(adjusted_view_strength * scaled_return)
                             view_uncertainties.append(
                                 0.5 * abs(adjusted_view_strength * scaled_return)
@@ -371,12 +519,18 @@ class BlackLittermanOptimizer:
                             p_row[assets.index(low_asset)] = -1
 
                             views.append(p_row)
-                            # Scale return by average exposure magnitude for this factor
+                            # Scale return using Information Coefficient and factor volatility
+                            factor_name = "INDPRO"
+                            ic_value = ic_values.get(
+                                factor_name, 0.1
+                            )  # Default IC if not available
                             avg_exposure = abs(growth_exposures.mean())
-                            # Use more meaningful monthly returns (1-2% range)
-                            scaled_return = (
-                                0.014 * regime_multiplier * max(avg_exposure, 0.01)
-                            )
+
+                            # IC-based scaling: higher IC = stronger views
+                            # Base monthly return: 1% with IC adjustment
+                            base_return = 0.01 * abs(ic_value) * regime_multiplier
+                            scaled_return = base_return * max(avg_exposure, 0.01)
+
                             view_returns.append(adjusted_view_strength * scaled_return)
                             view_uncertainties.append(
                                 0.5 * abs(adjusted_view_strength * scaled_return)
@@ -411,11 +565,18 @@ class BlackLittermanOptimizer:
                             p_row[assets.index(low_asset)] = -1
 
                             views.append(p_row)
-                            # Scale return by average exposure magnitude for this factor
+                            # Scale return using Information Coefficient and factor volatility
+                            factor_name = "^VIX"
+                            ic_value = ic_values.get(
+                                factor_name, 0.1
+                            )  # Default IC if not available
                             avg_exposure = abs(vix_exposures.mean())
-                            scaled_return = (
-                                0.005 * regime_multiplier * max(avg_exposure, 0.01)
-                            )
+
+                            # IC-based scaling: higher IC = stronger views
+                            # Base monthly return: 1% with IC adjustment
+                            base_return = 0.01 * abs(ic_value) * regime_multiplier
+                            scaled_return = base_return * max(avg_exposure, 0.01)
+
                             view_returns.append(adjusted_view_strength * scaled_return)
                             view_uncertainties.append(
                                 0.5 * abs(adjusted_view_strength * scaled_return)
