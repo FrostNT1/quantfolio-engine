@@ -248,7 +248,11 @@ class BlackLittermanOptimizer:
             1: 1.2,  # Neutral market - moderate views
             2: 1.5,  # Bear market - stronger views (value and defensive factors)
         }
-        regime_multiplier = regime_multipliers.get(current_regime, 1.0)
+        # Only use current_regime as key if it's an int
+        if isinstance(current_regime, int):
+            regime_multiplier = regime_multipliers.get(current_regime, 1.0)
+        else:
+            regime_multiplier = 1.0
 
         # Base view strength with regime adjustment
         adjusted_view_strength = view_strength * regime_multiplier

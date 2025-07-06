@@ -327,7 +327,11 @@ class MonteCarloOptimizer:
                 )
                 frontier_returns.append(result["expected_return"])
                 frontier_volatilities.append(result["volatility"])
-                frontier_weights.append(result["weights"].values)
+                weights = result["weights"]
+                if hasattr(weights, "values"):
+                    frontier_weights.append(weights.values)
+                else:
+                    frontier_weights.append(weights)
             except Exception as e:
                 logger.warning(
                     f"Failed to optimize for target return {target_return}: {e}"

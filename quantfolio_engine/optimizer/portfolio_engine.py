@@ -31,7 +31,7 @@ class PortfolioOptimizationEngine:
         risk_free_rate: float = 0.02,
         max_drawdown: float = 0.15,
         confidence_level: float = 0.95,
-        random_state: int = None,
+        random_state: Optional[int] = None,
     ):
         """
         Initialize portfolio optimization engine.
@@ -47,7 +47,7 @@ class PortfolioOptimizationEngine:
         self.risk_free_rate = risk_free_rate
         self.max_drawdown = max_drawdown
         self.confidence_level = confidence_level
-        self.random_state = random_state
+        self.random_state: Optional[int] = random_state
 
         # Initialize optimizers
         self.bl_optimizer = BlackLittermanOptimizer(risk_free_rate=risk_free_rate)
@@ -62,7 +62,7 @@ class PortfolioOptimizationEngine:
         self.bl_lambda = "auto"
         self.bl_gamma = 0.3
         self.bl_view_strength = 1.5
-        self.bl_lambda_range = None  # Will use config default if None
+        self.bl_lambda_range: Optional[str] = None  # Will use config default if None
 
     def set_bl_parameters(
         self,
@@ -278,7 +278,9 @@ class PortfolioOptimizationEngine:
 
         # Set grand view gamma and view strength in the optimizer
         self.bl_optimizer.grand_view_gamma = self.bl_gamma
-        self.bl_optimizer.view_strength = self.bl_view_strength
+        # Only set view_strength if the attribute exists
+        if hasattr(self.bl_optimizer, "view_strength"):
+            self.bl_optimizer.view_strength = self.bl_view_strength
 
         result = self.bl_optimizer.optimize_portfolio(
             returns_df=returns_df,
@@ -346,15 +348,35 @@ class PortfolioOptimizationEngine:
             data, constraints, target_return, max_volatility, sector_limits
         )
 
-        # Combine results (simple average for weights, recompute metrics)
-        combined_weights = (bl_result["weights"] + mc_result["weights"]) / 2
-        combined_return = (
-            bl_result["expected_return"] + mc_result["expected_return"]
-        ) / 2
+        # Ensure weights and expected_return are compatible types
+        bl_weights = bl_result["weights"]
+        mc_weights = mc_result["weights"]
+
+        def to_array(w):
+            if hasattr(w, "values") and not callable(w.values):
+                return w.values
+            elif isinstance(w, dict):
+                return np.array(list(w.values()))
+            return np.array(w)
+
+        bl_weights = to_array(bl_weights)
+        mc_weights = to_array(mc_weights)
+        combined_weights = (bl_weights + mc_weights) / 2
+
+        bl_return = bl_result["expected_return"]
+        mc_return = mc_result["expected_return"]
+        if isinstance(bl_return, dict) or isinstance(mc_return, dict):
+            logger.warning(
+                "Expected return is a dict, cannot combine. Using BL result."
+            )
+            combined_return = (
+                bl_return if not isinstance(bl_return, dict) else mc_return
+            )
+        else:
+            combined_return = (bl_return + mc_return) / 2
 
         # Recompute volatility for combined weights (volatility is nonlinear)
         returns_df = data["returns"]
-        # Infer frequency as in analyze_portfolio_risk
         try:
             freqstr = returns_df.index.to_period().freqstr
             if freqstr.upper().startswith("M"):
@@ -369,7 +391,15 @@ class PortfolioOptimizationEngine:
             freq = 12
         portfolio_returns = (returns_df * combined_weights).sum(axis=1)
         combined_vol = portfolio_returns.std() * np.sqrt(freq)  # Annualized
-        combined_sharpe = (combined_return - self.risk_free_rate) / combined_vol
+
+        # Compute Sharpe only if combined_return is a float
+        if isinstance(combined_return, dict):
+            logger.warning(
+                "Combined return is a dict, cannot compute Sharpe ratio. Setting to np.nan."
+            )
+            combined_sharpe = np.nan
+        else:
+            combined_sharpe = (combined_return - self.risk_free_rate) / combined_vol
 
         result = {
             "method": "combined",
@@ -422,7 +452,11 @@ class PortfolioOptimizationEngine:
             min_vol = 0.05
             max_vol = 0.30
             grid = np.linspace(min_vol, max_vol, n_points)
-            results = {"returns": [], "volatilities": [], "weights": []}
+            results: Dict[str, list] = {
+                "returns": [],
+                "volatilities": [],
+                "weights": [],
+            }
             for max_volatility in grid:
                 try:
                     res = self._optimize_black_litterman(
@@ -433,7 +467,11 @@ class PortfolioOptimizationEngine:
                     ):
                         results["returns"].append(res["expected_return"])
                         results["volatilities"].append(res["volatility"])
-                        results["weights"].append(res["weights"].values)
+                        weights = res["weights"]
+                        if hasattr(weights, "values"):
+                            results["weights"].append(weights.values)
+                        else:
+                            results["weights"].append(weights)
                 except Exception as e:
                     logger.warning(
                         f"BL frontier failed for vol={max_volatility:.3f}: {e}"
@@ -546,8 +584,11 @@ class PortfolioOptimizationEngine:
         # Save weights
         weights = results["weights"]
         weights_file = output_dir / "optimal_weights.csv"
-        weights.to_csv(weights_file)
-        logger.info(f"Saved optimal weights to {weights_file}")
+        if hasattr(weights, "to_csv"):
+            weights.to_csv(weights_file)
+            logger.info(f"Saved optimal weights to {weights_file}")
+        else:
+            logger.warning("Weights object is not a DataFrame/Series, skipping save.")
 
         # Save metrics
         metrics = {

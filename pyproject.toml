@@ -23,9 +23,9 @@ dependencies = [
     # Core data science
     "numpy>=1.24.0",
     "pandas>=2.0.0",
-    "scipy>=1.10.0",
+    "scipy==1.15.3",
     "scikit-learn>=1.3.0",
-    "statsmodels>=0.14.0",
+    "statsmodels==0.14.4",
 
     # Optimization
     "cvxpy>=1.3.0",
