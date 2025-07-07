@@ -9,6 +9,7 @@ from typing import Optional
 from loguru import logger
 import typer
 
+from .backtesting import WalkForwardBacktester
 from .config import DEFAULT_START_DATE
 from .data.data_loader import DataLoader
 
@@ -717,6 +718,263 @@ def optimize_portfolio(
         return
 
     logger.success("Portfolio optimization completed!")
+
+
+@app.command()
+def run_backtest(
+    method: str = typer.Option(
+        "combined",
+        "--method",
+        "-m",
+        help="Optimization method: 'black_litterman', 'monte_carlo', or 'combined'",
+    ),
+    train_years: int = typer.Option(
+        8,
+        "--train-years",
+        help="Years of data to use for training",
+    ),
+    test_years: int = typer.Option(
+        2,
+        "--test-years",
+        help="Years of data to use for testing",
+    ),
+    rebalance_frequency: str = typer.Option(
+        "monthly",
+        "--rebalance",
+        "-r",
+        help="Rebalance frequency: 'monthly', 'quarterly', or 'annual'",
+    ),
+    max_weight: float = typer.Option(
+        0.3,
+        "--max-weight",
+        help="Maximum weight per asset (e.g., 0.3 for 30%)",
+    ),
+    min_weight: float = typer.Option(
+        0.05,
+        "--min-weight",
+        help="Minimum weight per asset (e.g., 0.05 for 5%)",
+    ),
+    max_volatility: float = typer.Option(
+        0.15,
+        "--max-volatility",
+        "-v",
+        help="Maximum annual volatility (e.g., 0.15 for 15%)",
+    ),
+    risk_free_rate: float = typer.Option(
+        0.045,
+        "--risk-free-rate",
+        help="Risk-free rate for Sharpe ratio calculation",
+    ),
+    save_results: bool = typer.Option(
+        True,
+        "--save/--no-save",
+        help="Save backtest results to file",
+    ),
+    output_dir: Optional[str] = typer.Option(
+        None,
+        "--output-dir",
+        "-o",
+        help="Output directory for results (default: reports/)",
+    ),
+    random_state: Optional[int] = typer.Option(
+        None,
+        "--random-state",
+        help="Random state for reproducibility",
+    ),
+):
+    """
+    Run walk-forward backtesting.
+
+    This command performs walk-forward backtesting with configurable train/test windows
+    and rebalance frequencies. It validates data quality, runs portfolio optimization
+    on training windows, and evaluates performance on out-of-sample test periods.
+    """
+    import json
+    from pathlib import Path
+
+    import pandas as pd
+
+    logger.info("Starting walk-forward backtesting...")
+
+    # Initialize backtester
+    backtester = WalkForwardBacktester(
+        train_years=train_years,
+        test_years=test_years,
+        rebalance_frequency=rebalance_frequency,
+        risk_free_rate=risk_free_rate,
+        max_weight=max_weight,
+        min_weight=min_weight,
+        max_volatility=max_volatility,
+        random_state=random_state,
+    )
+
+    # Load data
+    logger.info("Loading data for backtesting...")
+    try:
+        # Load returns data
+        returns_file = Path("data/processed/returns_monthly.csv")
+        if not returns_file.exists():
+            logger.error(
+                "Returns data not found. Please run 'quantfolio fetch-data' first."
+            )
+            return
+
+        returns_df = pd.read_csv(returns_file, index_col=0, parse_dates=True)
+        logger.info(
+            f"Loaded returns data: {returns_df.shape[0]} periods, {returns_df.shape[1]} assets"
+        )
+
+        # Load factor data if available
+        factor_exposures = None
+        factor_regimes = None
+        sentiment_scores = None
+        macro_data = None
+
+        # Try to load factor exposures
+        factor_file = Path("data/processed/factor_exposures.csv")
+        if factor_file.exists():
+            factor_exposures = pd.read_csv(factor_file)
+            logger.info(f"Loaded factor exposures: {factor_exposures.shape}")
+
+        # Try to load factor regimes
+        regimes_file = Path("data/processed/factor_regimes_hmm.csv")
+        if regimes_file.exists():
+            factor_regimes = pd.read_csv(regimes_file)
+            logger.info(f"Loaded factor regimes: {factor_regimes.shape}")
+
+        # Try to load sentiment data
+        sentiment_file = Path("data/processed/sentiment_monthly.csv")
+        if sentiment_file.exists():
+            sentiment_scores = pd.read_csv(
+                sentiment_file, index_col=0, parse_dates=True
+            )
+            logger.info(f"Loaded sentiment data: {sentiment_scores.shape}")
+
+        # Try to load macro data
+        macro_file = Path("data/processed/macro_monthly.csv")
+        if macro_file.exists():
+            macro_data = pd.read_csv(macro_file, index_col=0, parse_dates=True)
+            logger.info(f"Loaded macro data: {macro_data.shape}")
+
+    except Exception as e:
+        logger.error(f"Error loading data: {str(e)}")
+        return
+
+    # Run backtest
+    try:
+        results = backtester.run_backtest(
+            returns_df=returns_df,
+            factor_exposures=factor_exposures,
+            factor_regimes=factor_regimes,
+            sentiment_scores=sentiment_scores,
+            macro_data=macro_data,
+            method=method,
+        )
+
+        if "error" in results:
+            logger.error(f"Backtest failed: {results['error']}")
+            return
+
+        # Display results
+        logger.info("\nBacktest Results:")
+        logger.info("=" * 50)
+
+        performance_df = results["performance_history"]
+        aggregate_metrics = results["aggregate_metrics"]
+
+        logger.info(f"Total periods: {aggregate_metrics['total_periods']}")
+        logger.info(
+            f"Average total return: {aggregate_metrics['avg_total_return']:.3f}"
+        )
+        logger.info(
+            f"Average Sharpe ratio: {aggregate_metrics['avg_sharpe_ratio']:.3f}"
+        )
+        logger.info(
+            f"Average Sortino ratio: {aggregate_metrics['avg_sortino_ratio']:.3f}"
+        )
+        logger.info(
+            f"Average Calmar ratio: {aggregate_metrics['avg_calmar_ratio']:.3f}"
+        )
+        logger.info(
+            f"Worst max drawdown: {aggregate_metrics['worst_max_drawdown']:.3f}"
+        )
+        logger.info(f"Average volatility: {aggregate_metrics['avg_volatility']:.3f}")
+        logger.info(f"Hit ratio: {aggregate_metrics['hit_ratio']:.3f}")
+        logger.info(
+            f"Excess return vs benchmark: {aggregate_metrics['excess_return']:.3f}"
+        )
+        logger.info(
+            f"Excess Sharpe vs benchmark: {aggregate_metrics['excess_sharpe']:.3f}"
+        )
+
+        # Save results
+        if save_results:
+            output_path = Path(output_dir) if output_dir else Path("reports")
+            output_path.mkdir(exist_ok=True)
+
+            # Save performance history
+            performance_file = output_path / "backtest_performance.csv"
+            if isinstance(performance_df, pd.DataFrame):
+                performance_df.to_csv(performance_file)
+            else:
+                pd.DataFrame(performance_df).to_csv(performance_file)
+            logger.success(f"Saved performance history to {performance_file}")
+
+            # Save weight history
+            weight_df = pd.DataFrame(results["weight_history"])
+            weight_file = output_path / "backtest_weights.csv"
+            weight_df.to_csv(weight_file)
+            logger.success(f"Saved weight history to {weight_file}")
+
+            # Save aggregate metrics
+            metrics_file = output_path / "backtest_metrics.json"
+            with open(metrics_file, "w") as f:
+                json.dump(aggregate_metrics, f, indent=2, default=str)
+            logger.success(f"Saved aggregate metrics to {metrics_file}")
+
+            # Save summary report
+            summary_file = output_path / "backtest_summary.txt"
+            with open(summary_file, "w") as f:
+                f.write("Walk-Forward Backtest Summary\n")
+                f.write("=" * 50 + "\n")
+                f.write(f"Method: {method}\n")
+                f.write(f"Train years: {train_years}\n")
+                f.write(f"Test years: {test_years}\n")
+                f.write(f"Rebalance frequency: {rebalance_frequency}\n")
+                f.write(f"Total periods: {aggregate_metrics['total_periods']}\n")
+                f.write(
+                    f"Average total return: {aggregate_metrics['avg_total_return']:.3f}\n"
+                )
+                f.write(
+                    f"Average Sharpe ratio: {aggregate_metrics['avg_sharpe_ratio']:.3f}\n"
+                )
+                f.write(
+                    f"Average Sortino ratio: {aggregate_metrics['avg_sortino_ratio']:.3f}\n"
+                )
+                f.write(
+                    f"Average Calmar ratio: {aggregate_metrics['avg_calmar_ratio']:.3f}\n"
+                )
+                f.write(
+                    f"Worst max drawdown: {aggregate_metrics['worst_max_drawdown']:.3f}\n"
+                )
+                f.write(
+                    f"Average volatility: {aggregate_metrics['avg_volatility']:.3f}\n"
+                )
+                f.write(f"Hit ratio: {aggregate_metrics['hit_ratio']:.3f}\n")
+                f.write(
+                    f"Excess return vs benchmark: {aggregate_metrics['excess_return']:.3f}\n"
+                )
+                f.write(
+                    f"Excess Sharpe vs benchmark: {aggregate_metrics['excess_sharpe']:.3f}\n"
+                )
+
+            logger.success(f"Saved backtest summary to {summary_file}")
+
+    except Exception as e:
+        logger.error(f"Backtest failed: {str(e)}")
+        return
+
+    logger.success("Walk-forward backtesting completed!")
 
 
 if __name__ == "__main__":

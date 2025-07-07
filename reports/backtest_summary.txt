@@ -1,0 +1,16 @@
+Walk-Forward Backtest Summary
+==================================================
+Method: combined
+Train years: 8
+Test years: 2
+Rebalance frequency: monthly
+Total periods: 90
+Average total return: 0.019
+Average Sharpe ratio: 0.850
+Average Sortino ratio: -0.665
+Average Calmar ratio: 3.520
+Worst max drawdown: -0.086
+Average volatility: 0.039
+Hit ratio: 0.600
+Excess return vs benchmark: 0.008
+Excess Sharpe vs benchmark: 0.597

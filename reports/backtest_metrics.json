@@ -1,0 +1,14 @@
+{
+  "total_periods": 90,
+  "avg_total_return": 0.01882204497146785,
+  "avg_sharpe_ratio": 0.8502310843646516,
+  "avg_sortino_ratio": -0.6649999862076753,
+  "avg_calmar_ratio": 3.520142693129347,
+  "worst_max_drawdown": -0.08582519776390986,
+  "avg_volatility": 0.03879911873250925,
+  "hit_ratio": 0.6,
+  "benchmark_avg_return": 0.010728865675312619,
+  "benchmark_avg_sharpe": 0.2530299817841346,
+  "excess_return": 0.008093179296155231,
+  "excess_sharpe": 0.597201102580517
+}

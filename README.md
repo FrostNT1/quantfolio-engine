@@ -46,24 +46,34 @@ A quantitative portfolio optimization engine designed for institutional asset ma
     - [ ] Develop dynamic correlation structure based on economic conditions
 
 ### 🔹 Phase 3.5: Walk-Forward Back-Testing & Validation
-- [ ] **Rolling/Expanding Window Testing**
-  - [ ] Configurable rebalance cadence (monthly, quarterly, annual)
-  - [ ] Out-of-sample validation with expanding training windows
-  - [ ] Rolling window performance tracking
-- [ ] **Transaction Cost & Turnover Modeling**
-  - [ ] Realistic transaction cost model (basis points)
-  - [ ] Turnover analysis and optimization
-  - [ ] Slippage and market impact modeling
-- [ ] **Benchmark Comparison**
-  - [ ] 60/40 portfolio benchmark
+- [ ] **Phase 1: Foundation**
+  - [ ] Data validator for sufficient history and quality
+  - [ ] Basic walk-forward framework with configurable train/test windows
+  - [ ] Simple transaction cost model (fixed bps by asset type)
+  - [ ] Core performance metrics (Sharpe, Sortino, MaxDD, Calmar)
+- [ ] **Phase 2: Benchmarks**
+  - [ ] Static 60/40 portfolio benchmark
+  - [ ] Rebalanced 60/40 (monthly/quarterly) for realistic competition
   - [ ] Equal-weighted portfolio baseline
-  - [ ] Monte Carlo baseline comparison
-  - [ ] Risk-adjusted performance metrics
-- [ ] **CI Validation & Guard Rails**
-  - [ ] Automated back-testing in CI pipeline
-  - [ ] Sharpe ratio and drawdown guard rails
-  - [ ] Performance degradation alerts
-  - [ ] Parameter sensitivity analysis
+  - [ ] Information ratio calculation vs benchmarks
+- [ ] **Phase 3: Advanced Features**
+  - [ ] Parameter sensitivity analysis (lookback_window, num_regimes, tau, view_confidence, rebalance_frequency)
+  - [ ] Advanced metrics (Omega ratio, skewness, hit ratio, VaR/CVaR)
+  - [ ] Factor-tilted benchmarks for factor timing validation
+  - [ ] Turnover analysis and optimization
+- [ ] **Data Strategy**
+  - [ ] 8 years training (2015-2023) + 2 years testing (2023-2025)
+  - [ ] Data quality validation before backtesting
+  - [ ] Synthetic data padding if needed (<8 years real data)
+  - [ ] Validate data continuity for rolling calculations
+- [ ] **Transaction Cost Model**
+  - [ ] Tiered costs: ETFs (5 bps), Large-Cap (10 bps), Small-Cap (20 bps), International (25 bps)
+  - [ ] Include benchmark transaction costs to prevent false alpha
+  - [ ] Turnover × cost per unit for each rebalance
+- [ ] **Performance Metrics**
+  - [ ] Core: Sharpe, Sortino, Max Drawdown, Calmar ratios
+  - [ ] Factor timing: Information ratio, hit ratio, skewness
+  - [ ] Risk: VaR/CVaR, turnover ratio, regime-specific performance
 
 ### 🔹 Phase 4: Risk Attribution Framework
 - [ ] Use marginal contribution to risk (MCR) or Brinson model
