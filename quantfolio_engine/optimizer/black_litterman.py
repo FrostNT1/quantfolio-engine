@@ -201,8 +201,7 @@ class BlackLittermanOptimizer:
         if "date" in factor_exposures.columns and "asset" in factor_exposures.columns:
             # Factor exposures is in long format - pivot to wide format for each factor
             factor_columns = [
-                col for col in factor_exposures.columns 
-                if col not in ["date", "asset"]
+                col for col in factor_exposures.columns if col not in ["date", "asset"]
             ]
 
             for factor_col in factor_columns:
@@ -378,19 +377,21 @@ class BlackLittermanOptimizer:
                     continue
         else:
             # Handle other formats (fallback)
-            logger.warning("Factor exposures format not recognized - using default IC values")
+            logger.warning(
+                "Factor exposures format not recognized - using default IC values"
+            )
             # Provide default IC values for common factors
             default_ic_values = {
-                "UNRATE": 0.15,      # Unemployment rate
-                "CPIAUCSL": 0.12,    # CPI
-                "INDPRO": 0.18,      # Industrial production
-                "FEDFUNDS": 0.20,    # Fed funds rate
-                "GDPC1": 0.10,       # GDP
-                "UMCSENT": 0.08,     # Consumer sentiment
-                "GS10": 0.25,        # 10-year Treasury
-                "M2SL": 0.05,        # Money supply
+                "UNRATE": 0.15,  # Unemployment rate
+                "CPIAUCSL": 0.12,  # CPI
+                "INDPRO": 0.18,  # Industrial production
+                "FEDFUNDS": 0.20,  # Fed funds rate
+                "GDPC1": 0.10,  # GDP
+                "UMCSENT": 0.08,  # Consumer sentiment
+                "GS10": 0.25,  # 10-year Treasury
+                "M2SL": 0.05,  # Money supply
                 "DCOILWTICO": 0.30,  # Oil price
-                "^VIX": 0.35,        # VIX volatility
+                "^VIX": 0.35,  # VIX volatility
             }
             ic_values.update(default_ic_values)
 
@@ -428,18 +429,17 @@ class BlackLittermanOptimizer:
             # Convert to wide format for the latest date
             latest_date = factor_exposures["date"].max()
             latest_exposures = factor_exposures[factor_exposures["date"] == latest_date]
-            
+
             # Pivot to get asset exposures for the latest date
             exposures_wide = latest_exposures.pivot(
                 index="date", columns="asset", values="UNRATE"  # Use any factor column
             )
-            
+
             # Get all factor columns except date and asset
             factor_columns = [
-                col for col in factor_exposures.columns 
-                if col not in ["date", "asset"]
+                col for col in factor_exposures.columns if col not in ["date", "asset"]
             ]
-            
+
             # Create a combined exposure for view formation
             latest_exposures_combined = {}
             for asset in exposures_wide.columns:
@@ -447,9 +447,9 @@ class BlackLittermanOptimizer:
                 if not asset_data.empty:
                     # Use the first factor as representative (or average across factors)
                     latest_exposures_combined[asset] = asset_data.iloc[0]
-            
+
             latest_exposures = pd.Series(latest_exposures_combined)
-            
+
         else:
             # Handle wide format or MultiIndex format (legacy)
             # Align data
@@ -530,22 +530,28 @@ class BlackLittermanOptimizer:
             # Create views based on factor exposures for the latest date
             latest_date = factor_exposures["date"].max()
             latest_data = factor_exposures[factor_exposures["date"] == latest_date]
-            
+
             # Group by asset and create views based on factor exposures
             for factor_col in factor_columns:
                 if factor_col in latest_data.columns:
                     # Get exposures for this factor
                     factor_exposures_series = latest_data.set_index("asset")[factor_col]
-                    factor_exposures_series = pd.to_numeric(factor_exposures_series, errors="coerce").dropna()
-                    
+                    factor_exposures_series = pd.to_numeric(
+                        factor_exposures_series, errors="coerce"
+                    ).dropna()
+
                     if len(factor_exposures_series) >= 2:
                         # Find assets with highest and lowest exposures
                         high_exposure = factor_exposures_series.nlargest(2)
                         low_exposure = factor_exposures_series.nsmallest(2)
-                        
+
                         for high_asset in high_exposure.index:
                             for low_asset in low_exposure.index:
-                                if high_asset != low_asset and high_asset in assets and low_asset in assets:
+                                if (
+                                    high_asset != low_asset
+                                    and high_asset in assets
+                                    and low_asset in assets
+                                ):
                                     # Prevent duplicate views
                                     view_pair = tuple(sorted([high_asset, low_asset]))
                                     if view_pair in view_pairs:
@@ -557,18 +563,25 @@ class BlackLittermanOptimizer:
                                     p_row[assets.index(low_asset)] = -1
 
                                     views.append(p_row)
-                                    
+
                                     # Scale return using Information Coefficient
                                     ic_value = ic_values.get(factor_col, 0.1)
                                     avg_exposure = abs(factor_exposures_series.mean())
-                                    
-                                    # IC-based scaling: higher IC = stronger views
-                                    base_return = 0.01 * abs(ic_value) * regime_multiplier
-                                    scaled_return = base_return * max(avg_exposure, 0.01)
 
-                                    view_returns.append(adjusted_view_strength * scaled_return)
+                                    # IC-based scaling: higher IC = stronger views
+                                    base_return = (
+                                        0.01 * abs(ic_value) * regime_multiplier
+                                    )
+                                    scaled_return = base_return * max(
+                                        avg_exposure, 0.01
+                                    )
+
+                                    view_returns.append(
+                                        adjusted_view_strength * scaled_return
+                                    )
                                     view_uncertainties.append(
-                                        0.5 * abs(adjusted_view_strength * scaled_return)
+                                        0.5
+                                        * abs(adjusted_view_strength * scaled_return)
                                     )
 
         else:
@@ -614,7 +627,9 @@ class BlackLittermanOptimizer:
                                 base_return = 0.01 * abs(ic_value) * regime_multiplier
                                 scaled_return = base_return * max(avg_exposure, 0.01)
 
-                                view_returns.append(adjusted_view_strength * scaled_return)
+                                view_returns.append(
+                                    adjusted_view_strength * scaled_return
+                                )
                                 view_uncertainties.append(
                                     0.5 * abs(adjusted_view_strength * scaled_return)
                                 )

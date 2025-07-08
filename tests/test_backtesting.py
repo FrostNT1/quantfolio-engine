@@ -393,7 +393,7 @@ class TestWalkForwardBacktester:
 
         # Calculate portfolio returns first
         portfolio_returns = (test_data * weights).sum(axis=1)
-        
+
         performance = backtester._calculate_test_performance(
             weights, test_data, rebalance_date, portfolio_returns
         )
@@ -562,7 +562,7 @@ class TestWalkForwardBacktester:
     def test_transaction_cost_modeling(self):
         """Test transaction cost calculation and application."""
         # Create test data
-        returns_df = pd.DataFrame(
+        test_returns_df = pd.DataFrame(
             {
                 "SPY": [0.01, 0.02, -0.01, 0.03],
                 "TLT": [0.005, -0.01, 0.02, 0.01],
@@ -579,7 +579,7 @@ class TestWalkForwardBacktester:
                 "ETFs": 0.0005,  # 5 bps
                 "Large_Cap": 0.001,  # 10 bps
                 "Small_Cap": 0.002,  # 20 bps
-            }
+            },
         )
 
         # Test transaction cost lookup
@@ -591,7 +591,7 @@ class TestWalkForwardBacktester:
         # Test transaction cost application in performance calculation
         weights = pd.Series({"SPY": 0.4, "TLT": 0.3, "AAPL": 0.3})
         prev_weights = pd.Series({"SPY": 0.5, "TLT": 0.3, "AAPL": 0.2})
-        
+
         # Calculate turnover
         turnover = (weights - prev_weights).abs().sum()
         assert abs(turnover - 0.2) < 1e-10  # Handle floating point precision
@@ -600,7 +600,7 @@ class TestWalkForwardBacktester:
         tc = 0.0
         for asset, weight_change in (weights - prev_weights).abs().items():
             tc += backtester._get_transaction_cost(asset) * weight_change
-        
+
         expected_tc = 0.1 * 0.0005 + 0.0 * 0.0005 + 0.1 * 0.001
         assert abs(tc - expected_tc) < 1e-6
 
@@ -617,23 +617,23 @@ class TestWalkForwardBacktester:
         )
 
         backtester = WalkForwardBacktester(train_years=1, test_years=1)
-        
+
         # Test benchmark calculation with SPY/TLT available
         benchmark_perf = backtester._calculate_benchmark_performance(
             returns_df, pd.Timestamp("2020-01-01")
         )
-        
+
         assert "benchmark_total_return" in benchmark_perf
         assert "benchmark_avg_return" in benchmark_perf
         assert "benchmark_volatility" in benchmark_perf
         assert "benchmark_sharpe_ratio" in benchmark_perf
-        
+
         # Test benchmark calculation without SPY/TLT (should use equal-weight)
         returns_df_no_spy = returns_df.drop(columns=["SPY", "TLT"])
         benchmark_perf_equal = backtester._calculate_benchmark_performance(
             returns_df_no_spy, pd.Timestamp("2020-01-01")
         )
-        
+
         assert "benchmark_total_return" in benchmark_perf_equal
         assert "benchmark_avg_return" in benchmark_perf_equal
 
@@ -650,17 +650,17 @@ class TestWalkForwardBacktester:
 
         # Test with insufficient data (should handle gracefully)
         backtester = WalkForwardBacktester(train_years=5, test_years=2)
-        
+
         # This should not raise an error but return empty results
         result = backtester.run_backtest(returns_df)
-        
+
         # Should have validation error due to insufficient data
         assert "error" in result or len(result.get("performance_history", [])) == 0
 
         # Test with valid data but short history
         backtester_short = WalkForwardBacktester(train_years=1, test_years=1)
         result_short = backtester_short.run_backtest(returns_df)
-        
+
         # Should have some results but limited periods
         if "performance_history" in result_short:
             assert len(result_short["performance_history"]) <= 2  # Limited periods
@@ -677,24 +677,29 @@ class TestWalkForwardBacktester:
         )
 
         backtester = WalkForwardBacktester(train_years=1, test_years=1)
-        
+
         # Test performance calculation with known weights
         weights = np.array([0.6, 0.4])  # 60/40 portfolio
         test_data = returns_df.iloc[2:4]  # 2 periods of test data
-        
+
         # Calculate portfolio returns first
         portfolio_returns = (test_data * weights).sum(axis=1)
-        
+
         performance = backtester._calculate_test_performance(
             weights, test_data, pd.Timestamp("2020-03-01"), portfolio_returns
         )
-        
+
         # Check that all expected metrics are present
         expected_metrics = [
-            "total_return", "avg_return", "volatility", "sharpe_ratio",
-            "sortino_ratio", "max_drawdown", "calmar_ratio"
+            "total_return",
+            "avg_return",
+            "volatility",
+            "sharpe_ratio",
+            "sortino_ratio",
+            "max_drawdown",
+            "calmar_ratio",
         ]
-        
+
         for metric in expected_metrics:
             assert metric in performance
             assert isinstance(performance[metric], (int, float))
@@ -704,21 +709,24 @@ class TestWalkForwardBacktester:
             {"SPY": [0.01, 0.01, 0.01], "TLT": [0.005, 0.005, 0.005]},
             index=pd.date_range("2020-01-01", periods=3, freq="ME"),
         )
-        
+
         # Calculate portfolio returns for zero volatility case
         zero_vol_portfolio_returns = (zero_vol_returns * weights).sum(axis=1)
-        
+
         zero_vol_performance = backtester._calculate_test_performance(
-            weights, zero_vol_returns, pd.Timestamp("2020-01-01"), zero_vol_portfolio_returns
+            weights,
+            zero_vol_returns,
+            pd.Timestamp("2020-01-01"),
+            zero_vol_portfolio_returns,
         )
-        
+
         assert zero_vol_performance["volatility"] == 0.0
         assert zero_vol_performance["sharpe_ratio"] == 0.0
 
     def test_aggregate_metrics_calculation(self):
         """Test aggregate metrics calculation across multiple periods."""
         backtester = WalkForwardBacktester(train_years=1, test_years=1)
-        
+
         # Mock performance history
         backtester.performance_history = [
             {
@@ -748,24 +756,34 @@ class TestWalkForwardBacktester:
                 "net_total_return": 0.028,  # total_return - transaction_cost
             },
         ]
-        
+
         aggregate_metrics = backtester._calculate_aggregate_metrics()
-        
+
         # Check that all expected aggregate metrics are present
         expected_metrics = [
-            "total_periods", "avg_total_return", "avg_sharpe_ratio",
-            "avg_sortino_ratio", "avg_calmar_ratio", "worst_max_drawdown",
-            "avg_volatility", "hit_ratio", "benchmark_avg_return",
-            "benchmark_avg_sharpe", "excess_return", "excess_sharpe"
+            "total_periods",
+            "avg_total_return",
+            "avg_sharpe_ratio",
+            "avg_sortino_ratio",
+            "avg_calmar_ratio",
+            "worst_max_drawdown",
+            "avg_volatility",
+            "hit_ratio",
+            "benchmark_avg_return",
+            "benchmark_avg_sharpe",
+            "excess_return",
+            "excess_sharpe",
         ]
-        
+
         for metric in expected_metrics:
             assert metric in aggregate_metrics
             assert isinstance(aggregate_metrics[metric], (int, float))
-        
+
         # Check specific calculations
         assert aggregate_metrics["total_periods"] == 2
-        assert abs(aggregate_metrics["avg_total_return"] - 0.04) < 1e-10  # (0.05 + 0.03) / 2
+        assert (
+            abs(aggregate_metrics["avg_total_return"] - 0.04) < 1e-10
+        )  # (0.05 + 0.03) / 2
         assert aggregate_metrics["hit_ratio"] == 1.0  # Both periods positive
         assert abs(aggregate_metrics["excess_return"] - 0.015) < 1e-10  # 0.04 - 0.025
 
@@ -806,13 +824,13 @@ class TestWalkForwardBacktester:
     def test_next_rebalance_date_calculation(self):
         """Test next rebalance date calculation."""
         backtester = WalkForwardBacktester(rebalance_frequency="monthly")
-        
+
         current_date = pd.Timestamp("2020-01-31")
         returns_df = pd.DataFrame(
             {"SPY": [0.01] * 12},
             index=pd.date_range("2020-01-01", periods=12, freq="ME"),
         )
-        
+
         next_date = backtester._get_next_rebalance_date(returns_df, current_date)
         expected_next = current_date + pd.DateOffset(months=1)
         assert next_date == expected_next
@@ -836,23 +854,24 @@ class TestWalkForwardBacktester:
         )
 
         # Create factor data in long format
-        factor_data = pd.DataFrame({
-            "date": ["2020-01-01", "2020-02-01", "2020-03-01", "2020-04-01"] * 2,
-            "asset": ["SPY"] * 4 + ["TLT"] * 4,
-            "factor1": [0.1, 0.2, -0.1, 0.3] * 2,
-            "factor2": [0.05, -0.1, 0.2, 0.1] * 2,
-        })
+        factor_data = pd.DataFrame(
+            {
+                "date": ["2020-01-01", "2020-02-01", "2020-03-01", "2020-04-01"] * 2,
+                "asset": ["SPY"] * 4 + ["TLT"] * 4,
+                "factor1": [0.1, 0.2, -0.1, 0.3] * 2,
+                "factor2": [0.05, -0.1, 0.2, 0.1] * 2,
+            }
+        )
 
         backtester = WalkForwardBacktester(train_years=1, test_years=1)
-        
+
         train_start = pd.Timestamp("2020-01-01")
         train_end = pd.Timestamp("2020-02-29")
-        
+
         train_data = backtester._get_training_data(
-            returns_df, factor_data, None, None, None,
-            train_start, train_end
+            returns_df, factor_data, None, None, None, train_start, train_end
         )
-        
+
         assert "returns" in train_data
         assert "factor_exposures" in train_data
         assert len(train_data["returns"]) == 2  # Jan and Feb

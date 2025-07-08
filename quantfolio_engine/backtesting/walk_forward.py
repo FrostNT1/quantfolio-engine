@@ -175,18 +175,26 @@ class WalkForwardBacktester:
         method: str,
     ) -> None:
         """Run the actual walk-forward backtest."""
-        
+
         # Get rebalance dates
         rebalance_dates = self._get_rebalance_dates(returns_df)
         logger.info(f"Running {len(rebalance_dates)} rebalance periods...")
         prev_weights = None
         for i, rebalance_date in enumerate(rebalance_dates):
-            logger.info(f"Rebalance {i+1}/{len(rebalance_dates)}: {rebalance_date.date()}")
+            logger.info(
+                f"Rebalance {i+1}/{len(rebalance_dates)}: {rebalance_date.date()}"
+            )
             # Get training data (expanding window)
             train_end = rebalance_date
             train_start = returns_df.index.min()
             train_data = self._get_training_data(
-                returns_df, factor_exposures, factor_regimes, sentiment_scores, macro_data, train_start, train_end
+                returns_df,
+                factor_exposures,
+                factor_regimes,
+                sentiment_scores,
+                macro_data,
+                train_start,
+                train_end,
             )
             # Get testing data (next period)
             test_start = rebalance_date
@@ -210,7 +218,10 @@ class WalkForwardBacktester:
 
                 # Calculate test performance
                 test_performance = self._calculate_test_performance(
-                    portfolio_result["weights"], test_data, rebalance_date, portfolio_returns
+                    portfolio_result["weights"],
+                    test_data,
+                    rebalance_date,
+                    portfolio_returns,
                 )
 
                 # Calculate turnover and transaction cost
@@ -219,11 +230,11 @@ class WalkForwardBacktester:
                     weights = pd.Series(weights, index=returns_df.columns)
                 turnover = 0.0
                 tc = 0.0
-                
+
                 if prev_weights is not None:
                     # Calculate turnover
                     turnover = (weights - prev_weights).abs().sum()
-                    
+
                     # Calculate transaction costs
                     weight_changes = (weights - prev_weights).abs()
                     for asset, weight_change in weight_changes.items():
@@ -257,7 +268,7 @@ class WalkForwardBacktester:
                 performance_data.update(benchmark_performance)
 
                 self.performance_history.append(performance_data)
-                
+
                 # Update prev_weights for next iteration
                 prev_weights = weights.copy()
                 # Store weights
@@ -273,7 +284,9 @@ class WalkForwardBacktester:
             except Exception as e:
                 logger.error(f"Error in rebalance {rebalance_date.date()}: {str(e)}")
                 continue
-        logger.success(f"Walk-forward backtest completed with {len(self.performance_history)} periods")
+        logger.success(
+            f"Walk-forward backtest completed with {len(self.performance_history)} periods"
+        )
 
     def _get_rebalance_dates(self, returns_df: pd.DataFrame) -> List[pd.Timestamp]:
         """Get rebalance dates based on frequency."""
@@ -552,25 +565,27 @@ class WalkForwardBacktester:
                 period_returns = period_data.get("period_returns", [])
                 if period_returns:
                     all_returns.extend(period_returns)
-            
+
             if all_returns:
-                all_returns = np.array(all_returns)
-                avg_return = np.mean(all_returns)
-                downside_returns = all_returns[all_returns < 0]
-                
+                all_returns_array = np.array(all_returns)
+                avg_return = np.mean(all_returns_array)
+                downside_returns = all_returns_array[all_returns_array < 0]
+
                 if len(downside_returns) > 0:
                     downside_deviation = np.std(downside_returns)
                     if downside_deviation > 0:
                         # Use annualized risk-free rate
                         risk_free_rate_monthly = self.risk_free_rate / 12
-                        aggregate_sortino = (avg_return - risk_free_rate_monthly) / downside_deviation
+                        aggregate_sortino = (
+                            avg_return - risk_free_rate_monthly
+                        ) / downside_deviation
                     else:
                         aggregate_sortino = 0.0
                 else:
                     aggregate_sortino = 0.0
             else:
                 aggregate_sortino = 0.0
-                
+
         except Exception as e:
             logger.warning(f"Error calculating aggregate Sortino ratio: {e}")
             aggregate_sortino = 0.0

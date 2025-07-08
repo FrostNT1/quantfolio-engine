@@ -326,6 +326,7 @@ class TestDataLoader:
 
         # Create a temporary data loader with a test directory
         from quantfolio_engine.config import DataConfig
+
         test_config = DataConfig(
             raw_data_dir=tmp_path / "raw",
             processed_data_dir=tmp_path / "processed",
@@ -467,8 +468,10 @@ class TestDataLoader:
         """Test batch download fallback logic."""
         mock_download.side_effect = Exception("fail")
         loader = DataLoader()
-        with patch.object(loader, "_fetch_asset_returns_individual") as mock_fallback, \
-             patch.object(loader, "save_processed_data") as mock_save:  # Prevent overwriting real data
+        with (
+            patch.object(loader, "_fetch_asset_returns_individual") as mock_fallback,
+            patch.object(loader, "save_processed_data") as mock_save,
+        ):  # Prevent overwriting real data
             mock_fallback.return_value = {
                 "SPY": pd.Series(
                     [0.01, 0.02],
@@ -490,7 +493,9 @@ class TestDataLoader:
         # Patch yf_client to raise
         loader.yf_client = Mock()
         loader.yf_client.Ticker.side_effect = Exception("fail")
-        with patch.object(loader, "save_processed_data") as mock_save:  # Prevent overwriting real data
+        with patch.object(
+            loader, "save_processed_data"
+        ) as mock_save:  # Prevent overwriting real data
             df = loader.fetch_macro_indicators("2023-01-01", "2023-01-31")
             assert isinstance(df, pd.DataFrame)
             # Verify save_processed_data was called but with mocked behavior
@@ -500,7 +505,9 @@ class TestDataLoader:
         """Test fetch_sentiment_data with missing API key branch."""
         loader = DataLoader()
         loader.config.news_api_key = None
-        with patch.object(loader, "save_processed_data") as mock_save:  # Prevent overwriting real data
+        with patch.object(
+            loader, "save_processed_data"
+        ) as mock_save:  # Prevent overwriting real data
             df = loader.fetch_sentiment_data("2023-01-01", "2023-01-31")
             assert isinstance(df, pd.DataFrame)
             assert not df.empty
@@ -516,7 +523,9 @@ class TestDataLoader:
         loader.config.sentiment_entities = []
         loader.config.sentiment_topics = []
         # Should not raise
-        with patch.object(loader, "save_processed_data") as mock_save:  # Prevent overwriting real data
+        with patch.object(
+            loader, "save_processed_data"
+        ) as mock_save:  # Prevent overwriting real data
             returns = loader.fetch_asset_returns("2023-01-01", "2023-01-31")
             macro = loader.fetch_macro_indicators("2023-01-01", "2023-01-31")
             sentiment = loader.fetch_sentiment_data("2023-01-01", "2023-01-31")
