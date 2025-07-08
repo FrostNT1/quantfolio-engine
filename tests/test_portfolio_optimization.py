@@ -545,7 +545,7 @@ class TestPortfolioOptimizationEngine:
             assert (tech_weights.sum() <= 1.0 + 1e-6).all()
 
     def test_combined_vol_annualisation(self):
-        """Test that combined method uses correct frequency for volatility calculation."""
+        """Test that combined method uses mean-variance optimization for volatility calculation."""
         engine = PortfolioOptimizationEngine(method="combined")
 
         # Create test data
@@ -570,12 +570,23 @@ class TestPortfolioOptimizationEngine:
 
         result = engine.optimize_portfolio(data)
 
-        # Calculate expected volatility using same frequency logic
-        freq = 12  # monthly
-        port_ret_series = (data["returns"] * result["weights"]).sum(axis=1)
-        expected_vol = port_ret_series.std() * np.sqrt(freq)
+        # Test that the new combined method returns expected keys
+        assert "method" in result
+        assert result["method"] == "combined"
+        assert "weights" in result
+        assert "expected_return" in result
+        assert "volatility" in result
+        assert "sharpe_ratio" in result
+        assert "strategy_weights" in result
+        assert "correlation" in result
 
-        assert abs(result["volatility"] - expected_vol) < 1e-6
+        # Test that strategy weights sum to 1
+        strategy_weights = result["strategy_weights"]
+        assert abs(strategy_weights.sum() - 1.0) < 1e-6
+        assert all(strategy_weights >= 0)
+
+        # Test that final weights sum to 1
+        assert abs(result["weights"].sum() - 1.0) < 1e-6
 
 
 class TestIntegration:

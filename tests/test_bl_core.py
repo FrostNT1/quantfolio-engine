@@ -22,7 +22,7 @@ class TestBlackLittermanCore:
 
         # Create test data
         np.random.seed(42)
-        dates = pd.date_range("2020-01-01", periods=60, freq="M")
+        dates = pd.date_range("2020-01-01", periods=60, freq="ME")
         assets = ["SPY", "TLT", "GLD", "AAPL", "MSFT", "JPM"]
 
         # Generate realistic returns data

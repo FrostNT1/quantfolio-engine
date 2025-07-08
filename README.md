@@ -46,24 +46,39 @@ A quantitative portfolio optimization engine designed for institutional asset ma
     - [ ] Develop dynamic correlation structure based on economic conditions
 
 ### 🔹 Phase 3.5: Walk-Forward Back-Testing & Validation
-- [ ] **Rolling/Expanding Window Testing**
-  - [ ] Configurable rebalance cadence (monthly, quarterly, annual)
-  - [ ] Out-of-sample validation with expanding training windows
-  - [ ] Rolling window performance tracking
-- [ ] **Transaction Cost & Turnover Modeling**
-  - [ ] Realistic transaction cost model (basis points)
-  - [ ] Turnover analysis and optimization
-  - [ ] Slippage and market impact modeling
-- [ ] **Benchmark Comparison**
-  - [ ] 60/40 portfolio benchmark
-  - [ ] Equal-weighted portfolio baseline
-  - [ ] Monte Carlo baseline comparison
-  - [ ] Risk-adjusted performance metrics
-- [ ] **CI Validation & Guard Rails**
-  - [ ] Automated back-testing in CI pipeline
-  - [ ] Sharpe ratio and drawdown guard rails
-  - [ ] Performance degradation alerts
-  - [ ] Parameter sensitivity analysis
+- [x] **Phase 1: Foundation**
+  - [x] Data validator for sufficient history and quality
+  - [x] Basic walk-forward framework with configurable train/test windows
+  - [x] Simple transaction cost model (fixed bps by asset type)
+  - [x] Core performance metrics (Sharpe, Sortino, MaxDD, Calmar)
+- [x] **Phase 2: Benchmarks**
+  - [x] Dynamic 60/40 portfolio benchmark (SPY/TLT when available)
+  - [x] Equal-weighted portfolio baseline
+  - [x] Information ratio calculation vs benchmarks
+- [x] **Phase 3: Advanced Features**
+  - [x] Transaction cost modeling and reporting
+  - [x] Turnover analysis and optimization
+  - [x] Advanced metrics (Omega ratio, skewness, hit ratio)
+  - [x] Factor-timing views with Information Coefficients
+- [x] **Data Strategy**
+  - [x] 8 years training + 2 years testing windows
+  - [x] Data quality validation before backtesting
+  - [x] Validate data continuity for rolling calculations
+- [x] **Transaction Cost Model**
+  - [x] Tiered costs: ETFs (5 bps), Large-Cap (10 bps), Default (20 bps)
+  - [x] Turnover × cost per unit for each rebalance
+  - [x] Net return calculations after transaction costs
+- [x] **Performance Metrics**
+  - [x] Core: Sharpe, Sortino, Max Drawdown, Calmar ratios
+  - [x] Factor timing: Information ratio, hit ratio, skewness
+  - [x] Risk: VaR/CVaR, turnover ratio, regime-specific performance
+- [x] **Visualization & Reporting**
+  - [x] Comprehensive backtest results plots (cumulative returns, Sharpe ratio, drawdown, volatility)
+  - [x] Performance comparison charts (portfolio vs benchmark)
+  - [x] Return distribution histograms with density estimation
+  - [x] Weight evolution tracking over time
+  - [x] Aggregate metrics visualization
+  - [x] Transaction cost and turnover analysis charts
 
 ### 🔹 Phase 4: Risk Attribution Framework
 - [ ] Use marginal contribution to risk (MCR) or Brinson model
@@ -146,10 +161,20 @@ quantfolio-engine/
 ├── notebooks/             <- Jupyter notebooks for EDA
 ├── quantfolio_engine/     <- Source code
 │   ├── __init__.py
+│   ├── cli.py            <- Command-line interface
 │   ├── config.py          <- Configuration management
 │   ├── data/              <- Data pipeline modules
+│   │   ├── data_loader.py <- Data fetching and processing
+│   │   └── dataset.py     <- Dataset management
 │   ├── signals/           <- Factor timing & sentiment signals
+│   │   └── factor_timing.py <- Factor regime detection
 │   ├── optimizer/         <- Black-Litterman & MC simulation
+│   │   ├── black_litterman.py <- Black-Litterman implementation
+│   │   ├── monte_carlo.py <- Monte Carlo simulation
+│   │   └── portfolio_engine.py <- Portfolio optimization engine
+│   ├── backtesting/       <- Walk-forward backtesting
+│   │   ├── walk_forward.py <- Main backtesting framework
+│   │   └── validator.py   <- Data validation
 │   ├── attribution/       <- Risk & return attribution
 │   ├── dashboard/         <- Streamlit interface
 │   └── utils/             <- Utility functions
@@ -164,7 +189,7 @@ quantfolio-engine/
 ### Installation
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/quantfolio-engine.git
+git clone https://github.com/FrostNT1/quantfolio-engine.git
 cd quantfolio-engine
 
 # Create environment
@@ -184,18 +209,110 @@ make requirements
 
 ### Basic Usage
 ```bash
-# Process data pipeline
-make data
+# Fetch and process data
+quantfolio fetch-data --start-date 2010-01-01 --save-raw
 
-# Generate features and signals
-python quantfolio_engine/signals/main.py
+# Generate factor timing signals
+quantfolio generate-signals
 
 # Run portfolio optimization
-python quantfolio_engine/optimizer/main.py
+quantfolio optimize-portfolio --method combined --max-weight 0.3 --min-weight 0.05
 
-# Launch dashboard
-streamlit run quantfolio_engine/dashboard/app.py
+# Run walk-forward backtesting
+quantfolio run-backtest --method combined --train-years 8 --test-years 2 --rebalance monthly
+
+# Generate visualization plots from backtest results
+quantfolio plot-backtest --type all
+
+# Check data status
+quantfolio status
+
+# Validate data quality
+quantfolio validate-data
+
+# Normalize data for analysis
+quantfolio normalize-data
 ```
+
+### Advanced Usage Examples
+
+```bash
+# Backtesting with custom parameters
+quantfolio run-backtest \
+  --method combined \
+  --train-years 8 \
+  --test-years 2 \
+  --rebalance monthly \
+  --max-weight 0.3 \
+  --min-weight 0.05 \
+  --max-volatility 0.15 \
+  --risk-free-rate 0.045 \
+  --random-state 42
+
+# Portfolio optimization with specific constraints
+quantfolio optimize-portfolio \
+  --method black_litterman \
+  --max-weight 0.25 \
+  --min-weight 0.05 \
+  --max-volatility 0.12 \
+  --risk-free-rate 0.04 \
+  --bl-auto \
+  --bl-view-strength 1.5
+
+# Generate signals with custom parameters
+quantfolio generate-signals \
+  --lookback 60 \
+  --regimes 3 \
+  --factor-method macro
+```
+
+## 🖥️ CLI Commands
+
+### Data Management
+```bash
+quantfolio fetch-data [--start-date YYYY-MM-DD] [--save-raw]
+quantfolio normalize-data
+quantfolio validate-data
+quantfolio status
+```
+
+### Signal Generation
+```bash
+quantfolio generate-signals [--lookback N] [--regimes N] [--factor-method METHOD]
+```
+
+### Portfolio Optimization
+```bash
+quantfolio optimize-portfolio [--method METHOD] [--constraints...]
+```
+
+### Backtesting
+```bash
+quantfolio run-backtest [--method METHOD] [--train-years N] [--test-years N] [--rebalance FREQ]
+```
+
+### Visualization
+```bash
+quantfolio plot-backtest [--type TYPE] [--performance-file PATH] [--weights-file PATH] [--metrics-file PATH]
+```
+
+### Available Methods
+- **`combined`**: Black-Litterman + Monte Carlo combination
+- **`black_litterman`**: Pure Black-Litterman optimization
+- **`monte_carlo`**: Pure Monte Carlo simulation
+- **`equal_weight`**: Equal-weight baseline
+
+### Rebalance Frequencies
+- **`monthly`**: Monthly rebalancing (default)
+- **`quarterly`**: Quarterly rebalancing
+- **`annual`**: Annual rebalancing
+
+### Visualization Types
+- **`all`**: Generate all visualization types (default)
+- **`backtest`**: Backtest results plots (cumulative returns, metrics over time)
+- **`comparison`**: Performance comparison charts (portfolio vs benchmark)
+- **`weights`**: Weight evolution tracking over time
+- **`metrics`**: Aggregate metrics visualization
 
 ## 📊 Key Concepts
 
@@ -319,9 +436,3 @@ This project is licensed under the BSD License - see the [LICENSE](LICENSE) file
 
 | Symptom                                                                   | Why it matters                                                                                      | Quick checks & tweaks                                                                                                                                  |
 | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Sharpe only ≈ 0.18** after views                                        | That's still thin excess return for 10 % vol.                                                       | ① Bump `lambda_range` to, say, `(1, 10)` and finer grid. ② Try lower `γ` (grand-view blend) — it drags π toward the mean and can dilute richer assets. |
-| **View strength fixed at 3× multiplier**                                  | May be too timid once λ rises.                                                                      | Pass `view_strength=self.bl_view_strength` from engine into `create_factor_timing_views`. Try 2 – 4 and compare.                                      |
-| **Regime = 0 every time**                                                 | Your HMM may be stuck in one state or the dates aren't lining up, so multiplier 2.0 is always used. | Inspect the last row of `factor_regimes` — if it never changes you're not getting regime diversification.                                              |
-| **Weights hit the hard cap 20 %** (TLT, GLD, WMT)                         | Caps are binding. Portfolio could want >20 % in other assets but can't.                             | Decide if 20 % is a design choice or temporary.                                                                                                        |
-| **VaR (95 %) –3.6 % monthly**                                             | Reasonable, but check if that's dominated by one asset class (GLD? TLT?).                           | Run `analyze_portfolio_risk()` to see asset-level contributions.                                                                                       |
-| **Warnings about "no common dates between factor exposures and regimes"** | Means views are built without regime context when those indices diverge.                            | Align dates earlier or fill forward regime labels.                                                                                                     |

@@ -7,10 +7,18 @@ This module provides CLI commands for data operations, model training, and portf
 from typing import Optional
 
 from loguru import logger
+import pandas as pd
 import typer
 
+from .backtesting import WalkForwardBacktester
 from .config import DEFAULT_START_DATE
 from .data.data_loader import DataLoader
+from .plots import (
+    plot_aggregate_metrics,
+    plot_backtest_results,
+    plot_performance_comparison,
+    plot_weight_evolution,
+)
 
 app = typer.Typer(
     name="quantfolio",
@@ -499,6 +507,12 @@ def optimize_portfolio(
         "--bl-auto",
         help="Enable auto-calibration for Black-Litterman (λ + γ)",
     ),
+    # Add CLI option for transaction cost multiplier
+    transaction_costs: Optional[str] = typer.Option(
+        None,
+        "--transaction-costs",
+        help='JSON string mapping asset types to transaction costs (e.g., \'{"ETF":0.0005,"Large_Cap":0.001}\')',
+    ),
 ):
     """
     Optimize portfolio using various methods.
@@ -509,6 +523,7 @@ def optimize_portfolio(
     import json
     from pathlib import Path
 
+    import numpy as np
     import pandas as pd
 
     from .optimizer.portfolio_engine import PortfolioOptimizationEngine
@@ -590,10 +605,10 @@ def optimize_portfolio(
 
             # Save frontier results
             if save_results:
-                output_dir = Path(output_dir) if output_dir else Path("reports")
-                output_dir.mkdir(exist_ok=True)
+                output_path = Path(output_dir) if output_dir else Path("reports")
+                output_path.mkdir(exist_ok=True)
 
-                frontier_file = output_dir / "efficient_frontier.csv"
+                frontier_file = output_path / "efficient_frontier.csv"
                 frontier_df = pd.DataFrame(
                     {
                         "return": frontier["returns"],
@@ -604,7 +619,7 @@ def optimize_portfolio(
                 logger.success(f"Saved efficient frontier to {frontier_file}")
 
                 # Save weights for each point
-                weights_file = output_dir / "frontier_weights.csv"
+                weights_file = output_path / "frontier_weights.csv"
                 weights_df = pd.DataFrame(frontier["weights"])
                 weights_df.to_csv(weights_file)
                 logger.success(f"Saved frontier weights to {weights_file}")
@@ -644,22 +659,56 @@ def optimize_portfolio(
             # Display top weights
             weights = results["weights"]
             logger.info("\nTop 5 Asset Weights:")
-            top_weights = weights.nlargest(5)
-            for asset, weight in top_weights.items():
-                logger.info(f"  {asset}: {weight:.3f}")
+
+            # Handle both pandas Series and numpy array weights
+            if isinstance(weights, pd.Series):
+                top_weights = weights.nlargest(5)
+                for asset, weight in top_weights.items():
+                    logger.info(f"  {asset}: {weight:.3f}")
+            elif isinstance(weights, np.ndarray):
+                # For numpy arrays, we need asset names and weights
+                asset_names = list(data["returns"].columns)
+                if len(asset_names) == len(weights):
+                    # Create a Series for easier handling
+                    weights_series = pd.Series(weights, index=asset_names)
+                    top_weights = weights_series.nlargest(5)
+                    for asset, weight in top_weights.items():
+                        logger.info(f"  {asset}: {weight:.3f}")
+                else:
+                    logger.warning("Asset names and weights have different lengths")
+            else:
+                logger.warning(f"Unexpected weights type: {type(weights)}")
 
             # Save results
             if save_results:
-                output_dir = Path(output_dir) if output_dir else Path("reports")
-                output_dir.mkdir(exist_ok=True)
+                output_path = Path(output_dir) if output_dir else Path("reports")
+                output_path.mkdir(exist_ok=True)
 
                 # Save weights
-                weights_file = output_dir / "optimal_weights.csv"
-                weights.to_csv(weights_file)
+                weights_file = output_path / "optimal_weights.csv"
+                if isinstance(weights, pd.Series):
+                    weights.to_csv(weights_file)
+                elif isinstance(weights, np.ndarray):
+                    # For numpy arrays, create a DataFrame with asset names
+                    asset_names = list(data["returns"].columns)
+                    if len(asset_names) == len(weights):
+                        weights_df = pd.DataFrame(
+                            {"asset": asset_names, "weight": weights}
+                        )
+                        weights_df.to_csv(weights_file, index=False)
+                    else:
+                        # Fallback: save as numpy array
+                        np.save(weights_file.with_suffix(".npy"), weights)
+                        logger.warning(
+                            f"Saved weights as numpy array to {weights_file.with_suffix('.npy')}"
+                        )
+                else:
+                    logger.warning(f"Cannot save weights of type {type(weights)}")
+                    return
                 logger.success(f"Saved optimal weights to {weights_file}")
 
                 # Save summary
-                summary_file = output_dir / "optimization_summary.txt"
+                summary_file = output_path / "optimization_summary.txt"
                 with open(summary_file, "w") as f:
                     f.write("Portfolio Optimization Summary\n")
                     f.write("=" * 50 + "\n")
@@ -682,6 +731,405 @@ def optimize_portfolio(
         return
 
     logger.success("Portfolio optimization completed!")
+
+
+@app.command()
+def run_backtest(
+    method: str = typer.Option(
+        "combined",
+        "--method",
+        "-m",
+        help="Optimization method: 'black_litterman', 'monte_carlo', or 'combined'",
+    ),
+    train_years: int = typer.Option(
+        8,
+        "--train-years",
+        help="Years of data to use for training",
+    ),
+    test_years: int = typer.Option(
+        2,
+        "--test-years",
+        help="Years of data to use for testing",
+    ),
+    rebalance_frequency: str = typer.Option(
+        "monthly",
+        "--rebalance",
+        "-r",
+        help="Rebalance frequency: 'monthly', 'quarterly', or 'annual'",
+    ),
+    max_weight: float = typer.Option(
+        0.3,
+        "--max-weight",
+        help="Maximum weight per asset (e.g., 0.3 for 30%)",
+    ),
+    min_weight: float = typer.Option(
+        0.05,
+        "--min-weight",
+        help="Minimum weight per asset (e.g., 0.05 for 5%)",
+    ),
+    max_volatility: float = typer.Option(
+        0.15,
+        "--max-volatility",
+        "-v",
+        help="Maximum annual volatility (e.g., 0.15 for 15%)",
+    ),
+    risk_free_rate: float = typer.Option(
+        0.045,
+        "--risk-free-rate",
+        help="Risk-free rate for Sharpe ratio calculation",
+    ),
+    save_results: bool = typer.Option(
+        True,
+        "--save/--no-save",
+        help="Save backtest results to file",
+    ),
+    output_dir: Optional[str] = typer.Option(
+        None,
+        "--output-dir",
+        "-o",
+        help="Output directory for results (default: reports/)",
+    ),
+    random_state: Optional[int] = typer.Option(
+        None,
+        "--random-state",
+        help="Random state for reproducibility",
+    ),
+    # Add CLI option for transaction cost multiplier
+    transaction_costs: Optional[str] = typer.Option(
+        None,
+        "--transaction-costs",
+        help='JSON string mapping asset types to transaction costs (e.g., \'{"ETF":0.0005,"Large_Cap":0.001}\')',
+    ),
+):
+    """
+    Run walk-forward backtesting.
+
+    This command performs walk-forward backtesting with configurable train/test windows
+    and rebalance frequencies. It validates data quality, runs portfolio optimization
+    on training windows, and evaluates performance on out-of-sample test periods.
+    """
+    import json
+    from pathlib import Path
+
+    import pandas as pd
+
+    logger.info("Starting walk-forward backtesting...")
+
+    # Initialize backtester
+    backtester = WalkForwardBacktester(
+        train_years=train_years,
+        test_years=test_years,
+        rebalance_frequency=rebalance_frequency,
+        risk_free_rate=risk_free_rate,
+        max_weight=max_weight,
+        min_weight=min_weight,
+        max_volatility=max_volatility,
+        random_state=random_state,
+        transaction_costs=json.loads(transaction_costs) if transaction_costs else None,
+    )
+
+    # Load data
+    logger.info("Loading data for backtesting...")
+    try:
+        # Load returns data
+        returns_file = Path("data/processed/returns_monthly.csv")
+        if not returns_file.exists():
+            logger.error(
+                "Returns data not found. Please run 'quantfolio fetch-data' first."
+            )
+            return
+
+        returns_df = pd.read_csv(returns_file, index_col=0, parse_dates=True)
+        logger.info(
+            f"Loaded returns data: {returns_df.shape[0]} periods, {returns_df.shape[1]} assets"
+        )
+
+        # Load factor data if available
+        factor_exposures = None
+        factor_regimes = None
+        sentiment_scores = None
+        macro_data = None
+
+        # Try to load factor exposures
+        factor_file = Path("data/processed/factor_exposures.csv")
+        if factor_file.exists():
+            factor_exposures = pd.read_csv(factor_file)
+            logger.info(f"Loaded factor exposures: {factor_exposures.shape}")
+
+        # Try to load factor regimes
+        regimes_file = Path("data/processed/factor_regimes_hmm.csv")
+        if regimes_file.exists():
+            factor_regimes = pd.read_csv(regimes_file)
+            logger.info(f"Loaded factor regimes: {factor_regimes.shape}")
+
+        # Try to load sentiment data
+        sentiment_file = Path("data/processed/sentiment_monthly.csv")
+        if sentiment_file.exists():
+            sentiment_scores = pd.read_csv(
+                sentiment_file, index_col=0, parse_dates=True
+            )
+            logger.info(f"Loaded sentiment data: {sentiment_scores.shape}")
+
+        # Try to load macro data
+        macro_file = Path("data/processed/macro_monthly.csv")
+        if macro_file.exists():
+            macro_data = pd.read_csv(macro_file, index_col=0, parse_dates=True)
+            logger.info(f"Loaded macro data: {macro_data.shape}")
+
+    except Exception as e:
+        logger.error(f"Error loading data: {str(e)}")
+        return
+
+    # Run backtest
+    try:
+        results = backtester.run_backtest(
+            returns_df=returns_df,
+            factor_exposures=factor_exposures,
+            factor_regimes=factor_regimes,
+            sentiment_scores=sentiment_scores,
+            macro_data=macro_data,
+            method=method,
+        )
+
+        if "error" in results:
+            logger.error(f"Backtest failed: {results['error']}")
+            return
+
+        # Display results
+        logger.info("\nBacktest Results:")
+        logger.info("=" * 50)
+
+        performance_df = results["performance_history"]
+        aggregate_metrics = results["aggregate_metrics"]
+
+        logger.info(f"Total periods: {aggregate_metrics['total_periods']}")
+        logger.info(
+            f"Average total return: {aggregate_metrics['avg_total_return']:.3f}"
+        )
+        logger.info(
+            f"Average Sharpe ratio: {aggregate_metrics['avg_sharpe_ratio']:.3f}"
+        )
+        logger.info(
+            f"Average Sortino ratio: {aggregate_metrics['avg_sortino_ratio']:.3f}"
+        )
+        logger.info(
+            f"Average Calmar ratio: {aggregate_metrics['avg_calmar_ratio']:.3f}"
+        )
+        logger.info(
+            f"Worst max drawdown: {aggregate_metrics['worst_max_drawdown']:.3f}"
+        )
+        logger.info(f"Average volatility: {aggregate_metrics['avg_volatility']:.3f}")
+        logger.info(f"Hit ratio: {aggregate_metrics['hit_ratio']:.3f}")
+        logger.info(
+            f"Excess return vs benchmark: {aggregate_metrics['excess_return']:.3f}"
+        )
+        logger.info(
+            f"Excess Sharpe vs benchmark: {aggregate_metrics['excess_sharpe']:.3f}"
+        )
+        # Add transaction cost reporting
+        logger.info(
+            f"Total transaction costs: {aggregate_metrics['total_transaction_costs']:.4f}"
+        )
+        logger.info(
+            f"Average transaction cost per period: {aggregate_metrics['avg_transaction_cost']:.4f}"
+        )
+        logger.info(
+            f"Total portfolio turnover: {aggregate_metrics['total_turnover']:.3f}"
+        )
+        logger.info(
+            f"Average turnover per period: {aggregate_metrics['avg_turnover']:.3f}"
+        )
+        logger.info(
+            f"Net total return (after costs): {aggregate_metrics['net_total_return']:.3f}"
+        )
+
+        # Save results
+        if save_results:
+            output_path = Path(output_dir) if output_dir else Path("reports")
+            output_path.mkdir(exist_ok=True)
+
+            # Save performance history
+            performance_file = output_path / "backtest_performance.csv"
+            if isinstance(performance_df, pd.DataFrame):
+                performance_df.to_csv(performance_file)
+            else:
+                pd.DataFrame(performance_df).to_csv(performance_file)
+            logger.success(f"Saved performance history to {performance_file}")
+
+            # Save weight history
+            weight_df = pd.DataFrame(results["weight_history"])
+            weight_file = output_path / "backtest_weights.csv"
+            weight_df.to_csv(weight_file)
+            logger.success(f"Saved weight history to {weight_file}")
+
+            # Save aggregate metrics
+            metrics_file = output_path / "backtest_metrics.json"
+            with open(metrics_file, "w") as f:
+                json.dump(aggregate_metrics, f, indent=2, default=str)
+            logger.success(f"Saved aggregate metrics to {metrics_file}")
+
+            # Save summary report
+            summary_file = output_path / "backtest_summary.txt"
+            with open(summary_file, "w") as f:
+                f.write("Walk-Forward Backtest Summary\n")
+                f.write("=" * 50 + "\n")
+                f.write(f"Method: {method}\n")
+                f.write(f"Train years: {train_years}\n")
+                f.write(f"Test years: {test_years}\n")
+                f.write(f"Rebalance frequency: {rebalance_frequency}\n")
+                f.write(f"Total periods: {aggregate_metrics['total_periods']}\n")
+                f.write(
+                    f"Average total return: {aggregate_metrics['avg_total_return']:.3f}\n"
+                )
+                f.write(
+                    f"Average Sharpe ratio: {aggregate_metrics['avg_sharpe_ratio']:.3f}\n"
+                )
+                f.write(
+                    f"Average Sortino ratio: {aggregate_metrics['avg_sortino_ratio']:.3f}\n"
+                )
+                f.write(
+                    f"Average Calmar ratio: {aggregate_metrics['avg_calmar_ratio']:.3f}\n"
+                )
+                f.write(
+                    f"Worst max drawdown: {aggregate_metrics['worst_max_drawdown']:.3f}\n"
+                )
+                f.write(
+                    f"Average volatility: {aggregate_metrics['avg_volatility']:.3f}\n"
+                )
+                f.write(f"Hit ratio: {aggregate_metrics['hit_ratio']:.3f}\n")
+                f.write(
+                    f"Excess return vs benchmark: {aggregate_metrics['excess_return']:.3f}\n"
+                )
+                f.write(
+                    f"Excess Sharpe vs benchmark: {aggregate_metrics['excess_sharpe']:.3f}\n"
+                )
+                f.write(
+                    f"Total transaction costs: {aggregate_metrics['total_transaction_costs']:.4f}\n"
+                )
+                f.write(
+                    f"Average transaction cost per period: {aggregate_metrics['avg_transaction_cost']:.4f}\n"
+                )
+                f.write(
+                    f"Total portfolio turnover: {aggregate_metrics['total_turnover']:.3f}\n"
+                )
+                f.write(
+                    f"Average turnover per period: {aggregate_metrics['avg_turnover']:.3f}\n"
+                )
+                f.write(
+                    f"Net total return (after costs): {aggregate_metrics['net_total_return']:.3f}\n"
+                )
+
+            logger.success(f"Saved backtest summary to {summary_file}")
+
+    except Exception as e:
+        logger.error(f"Backtest failed: {str(e)}")
+        return
+
+    logger.success("Walk-forward backtesting completed!")
+
+
+@app.command()
+def plot_backtest(
+    performance_file: str = typer.Option(
+        "reports/backtest_performance.csv",
+        "--performance-file",
+        "-p",
+        help="Path to backtest performance CSV file",
+    ),
+    weights_file: Optional[str] = typer.Option(
+        None,
+        "--weights-file",
+        "-w",
+        help="Path to backtest weights CSV file",
+    ),
+    metrics_file: Optional[str] = typer.Option(
+        None,
+        "--metrics-file",
+        "-m",
+        help="Path to backtest metrics JSON file",
+    ),
+    output_dir: Optional[str] = typer.Option(
+        None,
+        "--output-dir",
+        "-o",
+        help="Output directory for plots (default: reports/)",
+    ),
+    plot_type: str = typer.Option(
+        "all",
+        "--type",
+        "-t",
+        help="Type of plot: 'backtest', 'comparison', 'weights', 'metrics', or 'all'",
+    ),
+):
+    """
+    Generate plots from backtest results.
+
+    This command creates various visualizations of backtest performance,
+    including cumulative returns, risk metrics, and portfolio evolution.
+    """
+    import json
+    from pathlib import Path
+
+    logger.info("Generating backtest plots...")
+
+    # Set output directory
+    output_path = Path(output_dir) if output_dir else Path("reports")
+    output_path.mkdir(exist_ok=True)
+
+    # Load performance data
+    try:
+        performance_df = pd.read_csv(performance_file, index_col=0, parse_dates=True)
+        logger.info(f"Loaded performance data: {performance_df.shape}")
+    except Exception as e:
+        logger.error(f"Error loading performance data: {str(e)}")
+        return
+
+    # Generate plots based on type
+    if plot_type in ["backtest", "all"]:
+        logger.info("Generating backtest results plot...")
+        plot_backtest_results(
+            performance_df=performance_df,
+            save_path=str(output_path / "backtest_results.png"),
+        )
+        # Add return distribution plot
+        from .plots import plot_return_distribution
+
+        logger.info("Generating return distribution histogram...")
+        plot_return_distribution(
+            performance_df=performance_df,
+            save_path=str(output_path / "return_distribution.png"),
+        )
+
+    if plot_type in ["comparison", "all"]:
+        logger.info("Generating performance comparison plot...")
+        plot_performance_comparison(
+            performance_df=performance_df,
+            save_path=str(output_path / "performance_comparison.png"),
+        )
+
+    if plot_type in ["weights", "all"] and weights_file:
+        try:
+            weights_df = pd.read_csv(weights_file)
+            logger.info("Generating weight evolution plot...")
+            plot_weight_evolution(
+                weight_df=weights_df,
+                save_path=str(output_path / "weight_evolution.png"),
+            )
+        except Exception as e:
+            logger.warning(f"Could not generate weight plot: {str(e)}")
+
+    if plot_type in ["metrics", "all"] and metrics_file:
+        try:
+            with open(metrics_file, "r") as f:
+                metrics = json.load(f)
+            logger.info("Generating aggregate metrics plot...")
+            plot_aggregate_metrics(
+                metrics=metrics, save_path=str(output_path / "aggregate_metrics.png")
+            )
+        except Exception as e:
+            logger.warning(f"Could not generate metrics plot: {str(e)}")
+
+    logger.success(f"Plots saved to {output_path}")
 
 
 if __name__ == "__main__":

@@ -68,7 +68,7 @@ ALPHA_VANTAGE_KEY=your_actual_alpha_vantage_key
 ### 1. Load Data
 
 ```bash
-make data
+quantfolio fetch-data --start-date 2010-01-01
 ```
 
 This will download:
@@ -79,7 +79,7 @@ This will download:
 ### 2. Generate Factor Timing Signals
 
 ```bash
-make signals
+quantfolio generate-signals
 ```
 
 This calculates:
@@ -90,7 +90,7 @@ This calculates:
 ### 3. Run Portfolio Optimization
 
 ```bash
-make optimize
+quantfolio optimize-portfolio --method combined
 ```
 
 This performs:
@@ -98,21 +98,27 @@ This performs:
 - Factor and sentiment view integration
 - Constraint optimization
 
-### 4. Launch Dashboard
+### 4. Run Backtesting
 
 ```bash
-make dashboard
+quantfolio run-backtest --method combined --train-years 8 --test-years 2
 ```
 
-This opens the Streamlit dashboard at `http://localhost:8501`
+This performs:
+- Walk-forward backtesting with transaction costs
+- Performance analysis and risk metrics
+- Benchmark comparison
 
-### 5. Run Full Pipeline
+### 5. Generate Plots and Reports
 
 ```bash
-make pipeline
+quantfolio plot-backtest --type all
 ```
 
-This runs the complete data → signals → optimization → attribution pipeline.
+This creates:
+- Performance charts and risk analysis
+- Factor attribution plots
+- Transaction cost analysis
 
 ## Configuration
 
@@ -204,8 +210,8 @@ results = attribution.comprehensive_attribution(
 ### Getting Help
 
 - Check the logs in `logs/` directory
-- Run `make validate` to check configuration
-- Review error messages in the dashboard
+- Run `quantfolio --help` to see available commands
+- Review error messages in the CLI output
 
 ## Next Steps
 
@@ -217,4 +223,4 @@ results = attribution.comprehensive_attribution(
 
 ## Contributing
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for development guidelines.
+See [Contributing](development/contributing.md) for development guidelines.

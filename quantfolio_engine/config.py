@@ -1,5 +1,7 @@
+from dataclasses import dataclass, field
 import os
 from pathlib import Path
+from typing import Dict, Optional
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -90,11 +92,64 @@ try:
 except ModuleNotFoundError:
     pass
 
+
+@dataclass
+class DataConfig:
+    """Configuration for data loading operations."""
+
+    # Asset universe and data sources
+    asset_universe: Dict[str, Dict]
+    macro_indicators: Dict[str, Dict]
+    sentiment_entities: list
+    sentiment_topics: list
+
+    # Date ranges
+    start_date: str
+    end_date: Optional[str]
+    data_frequency: str = "M"
+
+    # API keys
+    fred_api_key: Optional[str] = None
+    news_api_key: Optional[str] = None
+
+    # Data directories
+    raw_data_dir: Path = RAW_DATA_DIR
+    processed_data_dir: Path = PROCESSED_DATA_DIR
+
+    # Processing options
+    save_raw: bool = True
+    use_batch_download: bool = True
+    max_workers: int = 4
+
+    def __post_init__(self):
+        """Validate configuration after initialization."""
+        if not self.asset_universe:
+            raise ValueError("Asset universe cannot be empty")
+
+        if not self.macro_indicators:
+            raise ValueError("Macro indicators cannot be empty")
+
+        # Ensure directories exist
+        self.raw_data_dir.mkdir(parents=True, exist_ok=True)
+        self.processed_data_dir.mkdir(parents=True, exist_ok=True)
+
+
+def get_default_data_config() -> DataConfig:
+    """Get default data configuration."""
+    return DataConfig(
+        asset_universe=ASSET_UNIVERSE,
+        macro_indicators=MACRO_INDICATORS,
+        sentiment_entities=SENTIMENT_ENTITIES,
+        sentiment_topics=SENTIMENT_TOPICS,
+        start_date=DEFAULT_START_DATE,
+        end_date=DEFAULT_END_DATE,
+        data_frequency=DATA_FREQUENCY,
+        fred_api_key=FRED_API_KEY,
+        news_api_key=NEWS_API_KEY,
+    )
+
+
 # Black-Litterman Configuration
-from dataclasses import dataclass
-from typing import Dict, Optional
-
-
 @dataclass
 class BlackLittermanConfig:
     """Configuration for Black-Litterman optimization parameters."""
@@ -109,7 +164,7 @@ class BlackLittermanConfig:
 
     # View strength and regime multipliers
     view_strength: float = 1.5
-    regime_multipliers: Dict[int, float] = None
+    regime_multipliers: dict[int, float] = field(default_factory=dict)
 
     # Prior uncertainty
     tau: float = 0.05
@@ -119,7 +174,7 @@ class BlackLittermanConfig:
 
     def __post_init__(self):
         """Set default regime multipliers if not provided."""
-        if self.regime_multipliers is None:
+        if not self.regime_multipliers:
             self.regime_multipliers = {
                 0: 2.0,  # Bull market - much stronger views
                 1: 1.2,  # Neutral market - moderate views

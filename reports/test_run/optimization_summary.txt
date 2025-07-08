@@ -1,0 +1,8 @@
+Portfolio Optimization Summary
+==================================================
+Method: combined
+Expected Return: 0.186
+Volatility: 0.150
+Sharpe Ratio: 0.943
+
+Constraints: {'max_weight': 0.3, 'min_weight': 0.05}
