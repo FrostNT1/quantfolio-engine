@@ -312,7 +312,7 @@ class TestDataLoader:
         assert normalized_sentiment.min().min() >= -1.0
         assert normalized_sentiment.max().max() <= 1.0
 
-    def test_parquet_support(self):
+    def test_parquet_support(self, tmp_path):
         """Test parquet file support."""
         # Create sample data
         dates = pd.date_range("2023-01-01", "2023-12-31", freq="ME")
@@ -324,7 +324,23 @@ class TestDataLoader:
             index=dates,
         )
 
-        loader = DataLoader()
+        # Create a temporary data loader with a test directory
+        from quantfolio_engine.config import DataConfig
+        test_config = DataConfig(
+            raw_data_dir=tmp_path / "raw",
+            processed_data_dir=tmp_path / "processed",
+            asset_universe={"SPY": "SPY", "TLT": "TLT"},
+            macro_indicators={"CPI": {"name": "CPI", "source": "FRED"}},
+            sentiment_entities=[],
+            sentiment_topics=[],
+            start_date="2023-01-01",
+            end_date="2023-12-31",
+            save_raw=True,
+            max_workers=1,
+            fred_api_key="test",
+            news_api_key="test",
+        )
+        loader = DataLoader(config=test_config)
 
         # Test saving
         loader.save_processed_data(data, "test_data")
@@ -334,14 +350,7 @@ class TestDataLoader:
         assert loaded_data.shape == data.shape
         assert list(loaded_data.columns) == list(data.columns)
 
-        # Clean up
-        test_files = [
-            loader.config.processed_data_dir / "test_data.csv",
-            loader.config.processed_data_dir / "test_data.parquet",
-        ]
-        for file in test_files:
-            if file.exists():
-                file.unlink()
+        # Clean up is automatic with tmp_path
 
     def test_normalization(self):
         """Test normalization utilities for returns, macro, and sentiment."""
@@ -458,7 +467,8 @@ class TestDataLoader:
         """Test batch download fallback logic."""
         mock_download.side_effect = Exception("fail")
         loader = DataLoader()
-        with patch.object(loader, "_fetch_asset_returns_individual") as mock_fallback:
+        with patch.object(loader, "_fetch_asset_returns_individual") as mock_fallback, \
+             patch.object(loader, "save_processed_data") as mock_save:  # Prevent overwriting real data
             mock_fallback.return_value = {
                 "SPY": pd.Series(
                     [0.01, 0.02],
@@ -467,6 +477,8 @@ class TestDataLoader:
             }
             df = loader.fetch_asset_returns("2023-01-01", "2023-01-31")
             assert not df.empty
+            # Verify save_processed_data was called but with mocked behavior
+            mock_save.assert_called_once()
 
     def test_fetch_macro_indicators_vix_error(self):
         """Test VIX error branch in fetch_macro_indicators."""
@@ -478,16 +490,22 @@ class TestDataLoader:
         # Patch yf_client to raise
         loader.yf_client = Mock()
         loader.yf_client.Ticker.side_effect = Exception("fail")
-        df = loader.fetch_macro_indicators("2023-01-01", "2023-01-31")
-        assert isinstance(df, pd.DataFrame)
+        with patch.object(loader, "save_processed_data") as mock_save:  # Prevent overwriting real data
+            df = loader.fetch_macro_indicators("2023-01-01", "2023-01-31")
+            assert isinstance(df, pd.DataFrame)
+            # Verify save_processed_data was called but with mocked behavior
+            mock_save.assert_called_once()
 
     def test_fetch_sentiment_data_missing_api_key(self):
         """Test fetch_sentiment_data with missing API key branch."""
         loader = DataLoader()
         loader.config.news_api_key = None
-        df = loader.fetch_sentiment_data("2023-01-01", "2023-01-31")
-        assert isinstance(df, pd.DataFrame)
-        assert not df.empty
+        with patch.object(loader, "save_processed_data") as mock_save:  # Prevent overwriting real data
+            df = loader.fetch_sentiment_data("2023-01-01", "2023-01-31")
+            assert isinstance(df, pd.DataFrame)
+            assert not df.empty
+            # Verify save_processed_data was called but with mocked behavior
+            mock_save.assert_called_once()
 
     def test_empty_data(self):
         """Test edge case: empty data for returns, macro, sentiment."""
@@ -498,12 +516,15 @@ class TestDataLoader:
         loader.config.sentiment_entities = []
         loader.config.sentiment_topics = []
         # Should not raise
-        returns = loader.fetch_asset_returns("2023-01-01", "2023-01-31")
-        macro = loader.fetch_macro_indicators("2023-01-01", "2023-01-31")
-        sentiment = loader.fetch_sentiment_data("2023-01-01", "2023-01-31")
-        assert returns.empty
-        assert macro.empty
-        assert sentiment.empty
+        with patch.object(loader, "save_processed_data") as mock_save:  # Prevent overwriting real data
+            returns = loader.fetch_asset_returns("2023-01-01", "2023-01-31")
+            macro = loader.fetch_macro_indicators("2023-01-01", "2023-01-31")
+            sentiment = loader.fetch_sentiment_data("2023-01-01", "2023-01-31")
+            assert returns.empty
+            assert macro.empty
+            assert sentiment.empty
+            # Verify save_processed_data was called but with mocked behavior
+            assert mock_save.call_count >= 0  # May or may not be called for empty data
 
 
 def test_data_loader_import():

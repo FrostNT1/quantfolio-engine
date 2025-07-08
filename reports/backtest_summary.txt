@@ -7,10 +7,15 @@ Rebalance frequency: monthly
 Total periods: 90
 Average total return: 0.019
 Average Sharpe ratio: 0.850
-Average Sortino ratio: -0.665
-Average Calmar ratio: 3.520
+Average Sortino ratio: 0.349
+Average Calmar ratio: 3.521
 Worst max drawdown: -0.086
 Average volatility: 0.039
 Hit ratio: 0.600
 Excess return vs benchmark: 0.008
-Excess Sharpe vs benchmark: 0.597
+Excess Sharpe vs benchmark: 0.598
+Total transaction costs: 0.0035
+Average transaction cost per period: 0.0000
+Total portfolio turnover: 3.514
+Average turnover per period: 0.039
+Net total return (after costs): 0.019

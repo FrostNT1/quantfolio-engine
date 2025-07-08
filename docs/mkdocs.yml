@@ -1,4 +1,93 @@
-site_name: quantfolio-engine
-#
+site_name: QuantFolio Engine
+site_description: Smart Portfolio Construction Using Factor Timing and Multi-Source Signal Integration
 site_author: Shivam Tyagi
-#
+site_url: https://github.com/FrostNT1/quantfolio-engine
+
+# Repository
+repo_name: FrostNT1/quantfolio-engine
+repo_url: https://github.com/FrostNT1/quantfolio-engine
+
+# Theme
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - search.share
+
+# Navigation
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Results: results.md
+  - User Guide:
+    - Installation: user-guide/installation.md
+    - Configuration: user-guide/configuration.md
+    - CLI Reference: user-guide/cli-reference.md
+  - Tutorials:
+    - Quick Start: tutorials/quick-start.md
+    - Backtesting: tutorials/backtesting.md
+  - Advanced Topics:
+    - Factor Timing: advanced/factor-timing.md
+  - Development:
+    - Contributing: development/contributing.md
+
+# Plugins
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+
+# Extensions
+markdown_extensions:
+  - admonition
+  - codehilite
+  - footnotes
+  - meta
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+      combine_header_slug: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        case: lower
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+  - toc:
+      anchorlink: true
+      permalink: true

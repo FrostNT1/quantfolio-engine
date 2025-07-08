@@ -175,65 +175,91 @@ class WalkForwardBacktester:
         method: str,
     ) -> None:
         """Run the actual walk-forward backtest."""
-
+        
         # Get rebalance dates
         rebalance_dates = self._get_rebalance_dates(returns_df)
-
         logger.info(f"Running {len(rebalance_dates)} rebalance periods...")
-
+        prev_weights = None
         for i, rebalance_date in enumerate(rebalance_dates):
-            logger.info(
-                f"Rebalance {i+1}/{len(rebalance_dates)}: {rebalance_date.date()}"
-            )
-
+            logger.info(f"Rebalance {i+1}/{len(rebalance_dates)}: {rebalance_date.date()}")
             # Get training data (expanding window)
             train_end = rebalance_date
             train_start = returns_df.index.min()
             train_data = self._get_training_data(
-                returns_df,
-                factor_exposures,
-                factor_regimes,
-                sentiment_scores,
-                macro_data,
-                train_start,
-                train_end,
+                returns_df, factor_exposures, factor_regimes, sentiment_scores, macro_data, train_start, train_end
             )
-
             # Get testing data (next period)
             test_start = rebalance_date
             test_end = self._get_next_rebalance_date(returns_df, rebalance_date)
             test_data = self._get_testing_data(returns_df, test_start, test_end)
-
             if test_data.empty:
                 logger.warning(f"No test data available for {rebalance_date.date()}")
                 continue
-
             # Run optimization
             try:
                 portfolio_result = self._run_optimization(train_data, method)
                 if portfolio_result is None:
                     continue
+                # Calculate portfolio returns for transaction cost calculation
+                weights = portfolio_result["weights"]
+                if isinstance(weights, np.ndarray):
+                    weights_array = weights
+                else:
+                    weights_array = weights.values
+                portfolio_returns = (test_data * weights_array).sum(axis=1)
 
-                # Calculate performance for test period
+                # Calculate test performance
                 test_performance = self._calculate_test_performance(
-                    portfolio_result["weights"], test_data, rebalance_date
+                    portfolio_result["weights"], test_data, rebalance_date, portfolio_returns
                 )
 
-                # Calculate benchmark performance
+                # Calculate turnover and transaction cost
+                weights = portfolio_result["weights"]
+                if isinstance(weights, np.ndarray):
+                    weights = pd.Series(weights, index=returns_df.columns)
+                turnover = 0.0
+                tc = 0.0
+                
+                if prev_weights is not None:
+                    # Calculate turnover
+                    turnover = (weights - prev_weights).abs().sum()
+                    
+                    # Calculate transaction costs
+                    weight_changes = (weights - prev_weights).abs()
+                    for asset, weight_change in weight_changes.items():
+                        tc += self._get_transaction_cost(asset) * weight_change
+                else:
+                    # First rebalance - no turnover
+                    turnover = 0.0
+                    tc = 0.0
+
+                # Store performance metrics
+                performance_data = {
+                    "date": rebalance_date,
+                    "method": method,
+                    "total_return": test_performance["total_return"],
+                    "avg_return": test_performance["avg_return"],
+                    "volatility": test_performance["volatility"],
+                    "sharpe_ratio": test_performance["sharpe_ratio"],
+                    "sortino_ratio": test_performance["sortino_ratio"],
+                    "max_drawdown": test_performance["max_drawdown"],
+                    "calmar_ratio": test_performance["calmar_ratio"],
+                    "turnover": turnover,
+                    "transaction_cost": tc,
+                    "net_total_return": test_performance["total_return"] - tc,
+                    "period_returns": portfolio_returns.tolist(),  # Store individual period returns
+                }
+
+                # Add benchmark performance
                 benchmark_performance = self._calculate_benchmark_performance(
                     test_data, rebalance_date
                 )
+                performance_data.update(benchmark_performance)
 
-                # Store results
-                self.performance_history.append(
-                    {
-                        "date": rebalance_date,
-                        "method": method,
-                        **test_performance,
-                        **benchmark_performance,
-                    }
-                )
-
+                self.performance_history.append(performance_data)
+                
+                # Update prev_weights for next iteration
+                prev_weights = weights.copy()
                 # Store weights
                 weights_dict = {"date": rebalance_date}
                 if isinstance(portfolio_result["weights"], np.ndarray):
@@ -243,16 +269,11 @@ class WalkForwardBacktester:
                 else:
                     for asset, weight in portfolio_result["weights"].items():
                         weights_dict[asset] = weight
-
                 self.weight_history.append(weights_dict)
-
             except Exception as e:
                 logger.error(f"Error in rebalance {rebalance_date.date()}: {str(e)}")
                 continue
-
-        logger.success(
-            f"Walk-forward backtest completed with {len(self.performance_history)} periods"
-        )
+        logger.success(f"Walk-forward backtest completed with {len(self.performance_history)} periods")
 
     def _get_rebalance_dates(self, returns_df: pd.DataFrame) -> List[pd.Timestamp]:
         """Get rebalance dates based on frequency."""
@@ -374,19 +395,11 @@ class WalkForwardBacktester:
         weights: Union[pd.Series, np.ndarray],
         test_data: pd.DataFrame,
         rebalance_date: pd.Timestamp,
+        portfolio_returns: pd.Series,
     ) -> Dict[str, float]:
         """Calculate performance metrics for test period."""
         try:
-            # Convert weights to numpy array if needed
-            if isinstance(weights, pd.Series):
-                weights_array = weights.values
-            else:
-                weights_array = weights
-
-            # Calculate portfolio returns
-            portfolio_returns = (test_data * weights_array).sum(axis=1)
-
-            # Calculate metrics
+            # Calculate metrics using provided portfolio returns
             total_return = (1 + portfolio_returns).prod() - 1
             avg_return = portfolio_returns.mean()
             volatility = portfolio_returns.std()
@@ -512,7 +525,6 @@ class WalkForwardBacktester:
             "total_periods": len(df),
             "avg_total_return": df["total_return"].mean(),
             "avg_sharpe_ratio": df["sharpe_ratio"].mean(),
-            "avg_sortino_ratio": df["sortino_ratio"].mean(),
             "avg_calmar_ratio": df["calmar_ratio"].mean(),
             "worst_max_drawdown": df["max_drawdown"].min(),
             "avg_volatility": df["volatility"].mean(),
@@ -523,6 +535,56 @@ class WalkForwardBacktester:
             - df["benchmark_total_return"].mean(),
             "excess_sharpe": df["sharpe_ratio"].mean()
             - df["benchmark_sharpe_ratio"].mean(),
+            # Add transaction cost metrics
+            "total_transaction_costs": df["transaction_cost"].sum(),
+            "avg_transaction_cost": df["transaction_cost"].mean(),
+            "total_turnover": df["turnover"].sum(),
+            "avg_turnover": df["turnover"].mean(),
+            "net_total_return": df["net_total_return"].mean(),
         }
 
+        # Calculate aggregate Sortino ratio properly
+        # Use cumulative returns and downside deviation across all periods
+        try:
+            # Get all portfolio returns across all periods
+            all_returns = []
+            for period_data in self.performance_history:
+                period_returns = period_data.get("period_returns", [])
+                if period_returns:
+                    all_returns.extend(period_returns)
+            
+            if all_returns:
+                all_returns = np.array(all_returns)
+                avg_return = np.mean(all_returns)
+                downside_returns = all_returns[all_returns < 0]
+                
+                if len(downside_returns) > 0:
+                    downside_deviation = np.std(downside_returns)
+                    if downside_deviation > 0:
+                        # Use annualized risk-free rate
+                        risk_free_rate_monthly = self.risk_free_rate / 12
+                        aggregate_sortino = (avg_return - risk_free_rate_monthly) / downside_deviation
+                    else:
+                        aggregate_sortino = 0.0
+                else:
+                    aggregate_sortino = 0.0
+            else:
+                aggregate_sortino = 0.0
+                
+        except Exception as e:
+            logger.warning(f"Error calculating aggregate Sortino ratio: {e}")
+            aggregate_sortino = 0.0
+
+        aggregate_metrics["avg_sortino_ratio"] = aggregate_sortino
+
         return aggregate_metrics
+
+    def _get_transaction_cost(self, asset: str) -> float:
+        """Return transaction cost (as a decimal) for a given asset based on type."""
+        # Default mapping (can be extended)
+        if asset in ["SPY", "TLT", "GLD", "EFA", "IWM", "XLE"]:
+            return 0.0005  # ETF
+        elif asset in ["AAPL", "MSFT", "JPM", "UNH", "WMT", "BA"]:
+            return 0.001  # Large Cap
+        else:
+            return 0.002  # Default for others

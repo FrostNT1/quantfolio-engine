@@ -6,12 +6,14 @@ This module provides CLI commands for data operations, model training, and portf
 
 from typing import Optional
 
+import pandas as pd
 from loguru import logger
 import typer
 
 from .backtesting import WalkForwardBacktester
 from .config import DEFAULT_START_DATE
 from .data.data_loader import DataLoader
+from .plots import plot_backtest_results, plot_performance_comparison, plot_weight_evolution, plot_aggregate_metrics
 
 app = typer.Typer(
     name="quantfolio",
@@ -500,6 +502,12 @@ def optimize_portfolio(
         "--bl-auto",
         help="Enable auto-calibration for Black-Litterman (λ + γ)",
     ),
+    # Add CLI option for transaction cost multiplier
+    transaction_costs: Optional[str] = typer.Option(
+        None,
+        "--transaction-costs",
+        help="JSON string mapping asset types to transaction costs (e.g., '{\"ETF\":0.0005,\"Large_Cap\":0.001}')",
+    ),
 ):
     """
     Optimize portfolio using various methods.
@@ -781,6 +789,12 @@ def run_backtest(
         "--random-state",
         help="Random state for reproducibility",
     ),
+    # Add CLI option for transaction cost multiplier
+    transaction_costs: Optional[str] = typer.Option(
+        None,
+        "--transaction-costs",
+        help="JSON string mapping asset types to transaction costs (e.g., '{\"ETF\":0.0005,\"Large_Cap\":0.001}')",
+    ),
 ):
     """
     Run walk-forward backtesting.
@@ -806,6 +820,7 @@ def run_backtest(
         min_weight=min_weight,
         max_volatility=max_volatility,
         random_state=random_state,
+        transaction_costs=json.loads(transaction_costs) if transaction_costs else None,
     )
 
     # Load data
@@ -906,6 +921,22 @@ def run_backtest(
         logger.info(
             f"Excess Sharpe vs benchmark: {aggregate_metrics['excess_sharpe']:.3f}"
         )
+        # Add transaction cost reporting
+        logger.info(
+            f"Total transaction costs: {aggregate_metrics['total_transaction_costs']:.4f}"
+        )
+        logger.info(
+            f"Average transaction cost per period: {aggregate_metrics['avg_transaction_cost']:.4f}"
+        )
+        logger.info(
+            f"Total portfolio turnover: {aggregate_metrics['total_turnover']:.3f}"
+        )
+        logger.info(
+            f"Average turnover per period: {aggregate_metrics['avg_turnover']:.3f}"
+        )
+        logger.info(
+            f"Net total return (after costs): {aggregate_metrics['net_total_return']:.3f}"
+        )
 
         # Save results
         if save_results:
@@ -967,6 +998,21 @@ def run_backtest(
                 f.write(
                     f"Excess Sharpe vs benchmark: {aggregate_metrics['excess_sharpe']:.3f}\n"
                 )
+                f.write(
+                    f"Total transaction costs: {aggregate_metrics['total_transaction_costs']:.4f}\n"
+                )
+                f.write(
+                    f"Average transaction cost per period: {aggregate_metrics['avg_transaction_cost']:.4f}\n"
+                )
+                f.write(
+                    f"Total portfolio turnover: {aggregate_metrics['total_turnover']:.3f}\n"
+                )
+                f.write(
+                    f"Average turnover per period: {aggregate_metrics['avg_turnover']:.3f}\n"
+                )
+                f.write(
+                    f"Net total return (after costs): {aggregate_metrics['net_total_return']:.3f}\n"
+                )
 
             logger.success(f"Saved backtest summary to {summary_file}")
 
@@ -975,6 +1021,110 @@ def run_backtest(
         return
 
     logger.success("Walk-forward backtesting completed!")
+
+
+@app.command()
+def plot_backtest(
+    performance_file: str = typer.Option(
+        "reports/backtest_performance.csv",
+        "--performance-file",
+        "-p",
+        help="Path to backtest performance CSV file",
+    ),
+    weights_file: Optional[str] = typer.Option(
+        None,
+        "--weights-file",
+        "-w",
+        help="Path to backtest weights CSV file",
+    ),
+    metrics_file: Optional[str] = typer.Option(
+        None,
+        "--metrics-file",
+        "-m",
+        help="Path to backtest metrics JSON file",
+    ),
+    output_dir: Optional[str] = typer.Option(
+        None,
+        "--output-dir",
+        "-o",
+        help="Output directory for plots (default: reports/)",
+    ),
+    plot_type: str = typer.Option(
+        "all",
+        "--type",
+        "-t",
+        help="Type of plot: 'backtest', 'comparison', 'weights', 'metrics', or 'all'",
+    ),
+):
+    """
+    Generate plots from backtest results.
+    
+    This command creates various visualizations of backtest performance,
+    including cumulative returns, risk metrics, and portfolio evolution.
+    """
+    import json
+    from pathlib import Path
+    
+    logger.info("Generating backtest plots...")
+    
+    # Set output directory
+    output_path = Path(output_dir) if output_dir else Path("reports")
+    output_path.mkdir(exist_ok=True)
+    
+    # Load performance data
+    try:
+        performance_df = pd.read_csv(performance_file, index_col=0, parse_dates=True)
+        logger.info(f"Loaded performance data: {performance_df.shape}")
+    except Exception as e:
+        logger.error(f"Error loading performance data: {str(e)}")
+        return
+    
+    # Generate plots based on type
+    if plot_type in ["backtest", "all"]:
+        logger.info("Generating backtest results plot...")
+        plot_backtest_results(
+            performance_df=performance_df,
+            save_path=str(output_path / "backtest_results.png")
+        )
+        # Add return distribution plot
+        from .plots import plot_return_distribution
+        logger.info("Generating return distribution histogram...")
+        plot_return_distribution(
+            performance_df=performance_df,
+            save_path=str(output_path / "return_distribution.png")
+        )
+    
+    if plot_type in ["comparison", "all"]:
+        logger.info("Generating performance comparison plot...")
+        plot_performance_comparison(
+            performance_df=performance_df,
+            save_path=str(output_path / "performance_comparison.png")
+        )
+    
+    if plot_type in ["weights", "all"] and weights_file:
+        try:
+            weights_df = pd.read_csv(weights_file)
+            logger.info("Generating weight evolution plot...")
+            plot_weight_evolution(
+                weight_df=weights_df,
+                save_path=str(output_path / "weight_evolution.png")
+            )
+        except Exception as e:
+            logger.warning(f"Could not generate weight plot: {str(e)}")
+    
+    if plot_type in ["metrics", "all"] and metrics_file:
+        try:
+            with open(metrics_file, 'r') as f:
+                metrics = json.load(f)
+            logger.info("Generating aggregate metrics plot...")
+            plot_aggregate_metrics(
+                metrics=metrics,
+                save_path=str(output_path / "aggregate_metrics.png")
+            )
+        except Exception as e:
+            logger.warning(f"Could not generate metrics plot: {str(e)}")
+    
+    logger.success(f"Plots saved to {output_path}")
 
 
 if __name__ == "__main__":

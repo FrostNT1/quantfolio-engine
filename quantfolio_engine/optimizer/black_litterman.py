@@ -188,7 +188,7 @@ class BlackLittermanOptimizer:
         Higher IC indicates more predictive power for factor timing.
 
         Args:
-            factor_exposures: Asset factor exposures (with MultiIndex date, asset)
+            factor_exposures: Asset factor exposures (long format with date, asset columns)
             returns_df: Asset returns
             lookback_periods: Number of periods for IC calculation
 
@@ -197,10 +197,98 @@ class BlackLittermanOptimizer:
         """
         ic_values = {}
 
-        # Handle MultiIndex structure of factor exposures
-        if isinstance(factor_exposures.index, pd.MultiIndex):
-            # Factor exposures has MultiIndex (date, asset)
-            # We need to process each factor separately
+        # Handle long format factor exposures (with date, asset columns)
+        if "date" in factor_exposures.columns and "asset" in factor_exposures.columns:
+            # Factor exposures is in long format - pivot to wide format for each factor
+            factor_columns = [
+                col for col in factor_exposures.columns 
+                if col not in ["date", "asset"]
+            ]
+
+            for factor_col in factor_columns:
+                try:
+                    # Pivot the data for this specific factor
+                    exposures_pivot = factor_exposures.pivot(
+                        index="date", columns="asset", values=factor_col
+                    )
+
+                    # Align with returns data
+                    common_dates = exposures_pivot.index.intersection(returns_df.index)
+                    if len(common_dates) < lookback_periods + 1:
+                        logger.debug(
+                            f"Insufficient data for IC calculation of {factor_col}: {len(common_dates)} periods"
+                        )
+                        continue
+
+                    exposures_aligned = exposures_pivot.loc[common_dates]
+                    returns_aligned = returns_df.loc[common_dates]
+
+                    # Calculate rolling correlation between factor exposure and forward returns
+                    correlations = []
+                    for i in range(lookback_periods, len(common_dates)):
+                        # Current factor exposure
+                        current_exposure = exposures_aligned.iloc[i]
+
+                        # Forward returns (next period)
+                        if i + 1 < len(common_dates):
+                            forward_returns = returns_aligned.iloc[i + 1]
+
+                            # Ensure data is numeric
+                            try:
+                                current_exposure_numeric = pd.to_numeric(
+                                    current_exposure, errors="coerce"
+                                )
+                                forward_returns_numeric = pd.to_numeric(
+                                    forward_returns, errors="coerce"
+                                )
+
+                                # Check for valid data
+                                if (
+                                    not current_exposure_numeric.isna().all()
+                                    and not forward_returns_numeric.isna().all()
+                                ):
+                                    # Remove NaN values
+                                    valid_mask = ~(
+                                        current_exposure_numeric.isna()
+                                        | forward_returns_numeric.isna()
+                                    )
+                                    if (
+                                        valid_mask.sum() > 1
+                                    ):  # Need at least 2 points for correlation
+                                        # Extract values for correlation calculation
+                                        exposure_values = current_exposure_numeric[
+                                            valid_mask
+                                        ].values
+                                        returns_values = forward_returns_numeric[
+                                            valid_mask
+                                        ].values
+
+                                        if (
+                                            len(exposure_values) > 1
+                                            and len(returns_values) > 1
+                                        ):
+                                            corr = np.corrcoef(
+                                                exposure_values, returns_values
+                                            )[0, 1]
+                                            if not np.isnan(corr):
+                                                correlations.append(corr)
+                            except (ValueError, TypeError) as e:
+                                logger.debug(
+                                    f"Error calculating correlation for {factor_col}: {e}"
+                                )
+                                continue
+
+                    if correlations:
+                        ic_values[factor_col] = np.mean(correlations)
+                        logger.debug(
+                            f"IC for {factor_col}: {ic_values[factor_col]:.4f}"
+                        )
+
+                except Exception as e:
+                    logger.debug(f"Error processing factor {factor_col}: {e}")
+                    continue
+        elif isinstance(factor_exposures.index, pd.MultiIndex):
+            # Handle MultiIndex structure (legacy support)
             factor_columns = [
                 col for col in factor_exposures.columns if col not in ["date", "asset"]
             ]
@@ -289,8 +377,22 @@ class BlackLittermanOptimizer:
                     logger.debug(f"Error processing factor {factor_col}: {e}")
                     continue
         else:
-            # Handle non-MultiIndex case (fallback)
-            logger.warning("Factor exposures does not have MultiIndex structure")
+            # Handle other formats (fallback)
+            logger.warning("Factor exposures format not recognized - using default IC values")
+            # Provide default IC values for common factors
+            default_ic_values = {
+                "UNRATE": 0.15,      # Unemployment rate
+                "CPIAUCSL": 0.12,    # CPI
+                "INDPRO": 0.18,      # Industrial production
+                "FEDFUNDS": 0.20,    # Fed funds rate
+                "GDPC1": 0.10,       # GDP
+                "UMCSENT": 0.08,     # Consumer sentiment
+                "GS10": 0.25,        # 10-year Treasury
+                "M2SL": 0.05,        # Money supply
+                "DCOILWTICO": 0.30,  # Oil price
+                "^VIX": 0.35,        # VIX volatility
+            }
+            ic_values.update(default_ic_values)
 
         return ic_values
 
@@ -306,7 +408,7 @@ class BlackLittermanOptimizer:
         Create views based on factor timing signals.
 
         Args:
-            factor_exposures: Asset factor exposures
+            factor_exposures: Asset factor exposures (long format with date, asset columns)
             factor_regimes: Factor regime classifications
             sentiment_scores: Sentiment scores (optional)
             view_strength: Strength of factor timing views
@@ -321,23 +423,48 @@ class BlackLittermanOptimizer:
             factor_exposures, returns_df
         )
 
-        # Align data
-        common_dates = factor_exposures.index.intersection(factor_regimes.index)
-        if len(common_dates) == 0:
-            logger.warning("No common dates between factor exposures and regimes")
-            return np.array([]), np.array([]), np.array([])
+        # Handle long format factor exposures data
+        if "date" in factor_exposures.columns and "asset" in factor_exposures.columns:
+            # Convert to wide format for the latest date
+            latest_date = factor_exposures["date"].max()
+            latest_exposures = factor_exposures[factor_exposures["date"] == latest_date]
+            
+            # Pivot to get asset exposures for the latest date
+            exposures_wide = latest_exposures.pivot(
+                index="date", columns="asset", values="UNRATE"  # Use any factor column
+            )
+            
+            # Get all factor columns except date and asset
+            factor_columns = [
+                col for col in factor_exposures.columns 
+                if col not in ["date", "asset"]
+            ]
+            
+            # Create a combined exposure for view formation
+            latest_exposures_combined = {}
+            for asset in exposures_wide.columns:
+                asset_data = latest_exposures[latest_exposures["asset"] == asset]
+                if not asset_data.empty:
+                    # Use the first factor as representative (or average across factors)
+                    latest_exposures_combined[asset] = asset_data.iloc[0]
+            
+            latest_exposures = pd.Series(latest_exposures_combined)
+            
+        else:
+            # Handle wide format or MultiIndex format (legacy)
+            # Align data
+            common_dates = factor_exposures.index.intersection(factor_regimes.index)
+            if len(common_dates) == 0:
+                logger.warning("No common dates between factor exposures and regimes")
+                return np.array([]), np.array([]), np.array([])
 
-        exposures_aligned = factor_exposures.loc[common_dates]
-        # NOTE: regimes_aligned is not used in current implementation
-        # regimes_aligned = factor_regimes.loc[common_dates]
+            exposures_aligned = factor_exposures.loc[common_dates]
+            # Get latest data for view formation
+            latest_exposures = exposures_aligned.iloc[-1]
 
-        # Get latest data for view formation
-        latest_exposures = exposures_aligned.iloc[-1]
         # Debug logging only when appropriate level is set
         logger.debug(f"Latest exposures: {latest_exposures}")
         logger.debug(f"Latest exposures index: {latest_exposures.index}")
-        # Note: latest_regime is defined but not used in current implementation
-        # latest_regime = regimes_aligned.iloc[-1]
 
         # Create views based on factor exposures and regimes
         views = []
@@ -398,226 +525,99 @@ class BlackLittermanOptimizer:
         )
         logger.info(f"Adjusted view strength: {adjusted_view_strength:.3f}")
 
-        # View 1: Inflation Factor Timing (CPI)
-        # Assets with high CPI exposure may outperform in inflationary environments
-        cpi_exposures = latest_exposures.filter(like="CPIAUCSL")
-        if not cpi_exposures.empty:
-            cpi_exposures = pd.to_numeric(cpi_exposures, errors="coerce").dropna()
+        # For long format data, we need to create views differently
+        if "date" in factor_exposures.columns and "asset" in factor_exposures.columns:
+            # Create views based on factor exposures for the latest date
+            latest_date = factor_exposures["date"].max()
+            latest_data = factor_exposures[factor_exposures["date"] == latest_date]
+            
+            # Group by asset and create views based on factor exposures
+            for factor_col in factor_columns:
+                if factor_col in latest_data.columns:
+                    # Get exposures for this factor
+                    factor_exposures_series = latest_data.set_index("asset")[factor_col]
+                    factor_exposures_series = pd.to_numeric(factor_exposures_series, errors="coerce").dropna()
+                    
+                    if len(factor_exposures_series) >= 2:
+                        # Find assets with highest and lowest exposures
+                        high_exposure = factor_exposures_series.nlargest(2)
+                        low_exposure = factor_exposures_series.nsmallest(2)
+                        
+                        for high_asset in high_exposure.index:
+                            for low_asset in low_exposure.index:
+                                if high_asset != low_asset and high_asset in assets and low_asset in assets:
+                                    # Prevent duplicate views
+                                    view_pair = tuple(sorted([high_asset, low_asset]))
+                                    if view_pair in view_pairs:
+                                        continue
+                                    view_pairs.add(view_pair)
+
+                                    p_row = np.zeros(len(assets))
+                                    p_row[assets.index(high_asset)] = 1
+                                    p_row[assets.index(low_asset)] = -1
+
+                                    views.append(p_row)
+                                    
+                                    # Scale return using Information Coefficient
+                                    ic_value = ic_values.get(factor_col, 0.1)
+                                    avg_exposure = abs(factor_exposures_series.mean())
+                                    
+                                    # IC-based scaling: higher IC = stronger views
+                                    base_return = 0.01 * abs(ic_value) * regime_multiplier
+                                    scaled_return = base_return * max(avg_exposure, 0.01)
+
+                                    view_returns.append(adjusted_view_strength * scaled_return)
+                                    view_uncertainties.append(
+                                        0.5 * abs(adjusted_view_strength * scaled_return)
+                                    )
+
+        else:
+            # Original wide format logic (legacy)
+            # View 1: Inflation Factor Timing (CPI)
+            # Assets with high CPI exposure may outperform in inflationary environments
+            cpi_exposures = latest_exposures.filter(like="CPIAUCSL")
             if not cpi_exposures.empty:
-                high_cpi = cpi_exposures.nlargest(3).index
-                low_cpi = cpi_exposures.nsmallest(3).index
+                cpi_exposures = pd.to_numeric(cpi_exposures, errors="coerce").dropna()
+                if not cpi_exposures.empty:
+                    high_cpi = cpi_exposures.nlargest(3).index
+                    low_cpi = cpi_exposures.nsmallest(3).index
 
-                for high_asset_col in high_cpi:
-                    for low_asset_col in low_cpi:
-                        high_asset = extract_asset(high_asset_col)
-                        low_asset = extract_asset(low_asset_col)
-                        if (
-                            high_asset != low_asset
-                            and high_asset in assets
-                            and low_asset in assets
-                        ):
-                            # Prevent duplicate views
-                            view_pair = tuple(sorted([high_asset, low_asset]))
-                            if view_pair in view_pairs:
-                                continue
-                            view_pairs.add(view_pair)
+                    for high_asset_col in high_cpi:
+                        for low_asset_col in low_cpi:
+                            high_asset = extract_asset(high_asset_col)
+                            low_asset = extract_asset(low_asset_col)
+                            if (
+                                high_asset != low_asset
+                                and high_asset in assets
+                                and low_asset in assets
+                            ):
+                                # Prevent duplicate views
+                                view_pair = tuple(sorted([high_asset, low_asset]))
+                                if view_pair in view_pairs:
+                                    continue
+                                view_pairs.add(view_pair)
 
-                            p_row = np.zeros(len(assets))
-                            p_row[assets.index(high_asset)] = 1
-                            p_row[assets.index(low_asset)] = -1
+                                p_row = np.zeros(len(assets))
+                                p_row[assets.index(high_asset)] = 1
+                                p_row[assets.index(low_asset)] = -1
 
-                            views.append(p_row)
-                            # Scale return using Information Coefficient and factor volatility
-                            factor_name = "CPIAUCSL"
-                            ic_value = ic_values.get(
-                                factor_name, 0.1
-                            )  # Default IC if not available
-                            avg_exposure = abs(cpi_exposures.mean())
+                                views.append(p_row)
+                                # Scale return using Information Coefficient and factor volatility
+                                factor_name = "CPIAUCSL"
+                                ic_value = ic_values.get(
+                                    factor_name, 0.1
+                                )  # Default IC if not available
+                                avg_exposure = abs(cpi_exposures.mean())
 
-                            # IC-based scaling: higher IC = stronger views
-                            # Base monthly return: 1% with IC adjustment
-                            base_return = 0.01 * abs(ic_value) * regime_multiplier
-                            scaled_return = base_return * max(avg_exposure, 0.01)
+                                # IC-based scaling: higher IC = stronger views
+                                # Base monthly return: 1% with IC adjustment
+                                base_return = 0.01 * abs(ic_value) * regime_multiplier
+                                scaled_return = base_return * max(avg_exposure, 0.01)
 
-                            view_returns.append(adjusted_view_strength * scaled_return)
-                            view_uncertainties.append(
-                                0.5 * abs(adjusted_view_strength * scaled_return)
-                            )
-
-        # View 2: Interest Rate Factor Timing (FEDFUNDS)
-        # Assets with different rate sensitivity may perform differently
-        rate_exposures = latest_exposures.filter(like="FEDFUNDS")
-        if not rate_exposures.empty:
-            rate_exposures = pd.to_numeric(rate_exposures, errors="coerce").dropna()
-            if not rate_exposures.empty:
-                high_rate = rate_exposures.nlargest(3).index
-                low_rate = rate_exposures.nsmallest(3).index
-
-                for high_asset_col in high_rate:
-                    for low_asset_col in low_rate:
-                        high_asset = extract_asset(high_asset_col)
-                        low_asset = extract_asset(low_asset_col)
-                        if (
-                            high_asset != low_asset
-                            and high_asset in assets
-                            and low_asset in assets
-                        ):
-                            # Prevent duplicate views
-                            view_pair = tuple(sorted([high_asset, low_asset]))
-                            if view_pair in view_pairs:
-                                continue
-                            view_pairs.add(view_pair)
-
-                            p_row = np.zeros(len(assets))
-                            p_row[assets.index(high_asset)] = 1
-                            p_row[assets.index(low_asset)] = -1
-
-                            views.append(p_row)
-                            # Scale return using Information Coefficient and factor volatility
-                            factor_name = "FEDFUNDS"
-                            ic_value = ic_values.get(
-                                factor_name, 0.1
-                            )  # Default IC if not available
-                            avg_exposure = abs(rate_exposures.mean())
-
-                            # IC-based scaling: higher IC = stronger views
-                            # Base monthly return: 1% with IC adjustment
-                            base_return = 0.01 * abs(ic_value) * regime_multiplier
-                            scaled_return = base_return * max(avg_exposure, 0.01)
-
-                            view_returns.append(adjusted_view_strength * scaled_return)
-                            view_uncertainties.append(
-                                0.5 * abs(adjusted_view_strength * scaled_return)
-                            )
-
-        # View 3: Economic Growth Factor Timing (INDPRO)
-        # Assets with different growth sensitivity
-        growth_exposures = latest_exposures.filter(like="INDPRO")
-        if not growth_exposures.empty:
-            growth_exposures = pd.to_numeric(growth_exposures, errors="coerce").dropna()
-            if not growth_exposures.empty:
-                high_growth = growth_exposures.nlargest(3).index
-                low_growth = growth_exposures.nsmallest(3).index
-
-                for high_asset_col in high_growth:
-                    for low_asset_col in low_growth:
-                        high_asset = extract_asset(high_asset_col)
-                        low_asset = extract_asset(low_asset_col)
-                        if (
-                            high_asset != low_asset
-                            and high_asset in assets
-                            and low_asset in assets
-                        ):
-                            # Prevent duplicate views
-                            view_pair = tuple(sorted([high_asset, low_asset]))
-                            if view_pair in view_pairs:
-                                continue
-                            view_pairs.add(view_pair)
-
-                            p_row = np.zeros(len(assets))
-                            p_row[assets.index(high_asset)] = 1
-                            p_row[assets.index(low_asset)] = -1
-
-                            views.append(p_row)
-                            # Scale return using Information Coefficient and factor volatility
-                            factor_name = "INDPRO"
-                            ic_value = ic_values.get(
-                                factor_name, 0.1
-                            )  # Default IC if not available
-                            avg_exposure = abs(growth_exposures.mean())
-
-                            # IC-based scaling: higher IC = stronger views
-                            # Base monthly return: 1% with IC adjustment
-                            base_return = 0.01 * abs(ic_value) * regime_multiplier
-                            scaled_return = base_return * max(avg_exposure, 0.01)
-
-                            view_returns.append(adjusted_view_strength * scaled_return)
-                            view_uncertainties.append(
-                                0.5 * abs(adjusted_view_strength * scaled_return)
-                            )
-
-        # View 4: Market Volatility Factor Timing (^VIX)
-        # Assets with different volatility sensitivity
-        vix_exposures = latest_exposures.filter(like="^VIX")
-        if not vix_exposures.empty:
-            vix_exposures = pd.to_numeric(vix_exposures, errors="coerce").dropna()
-            if not vix_exposures.empty:
-                high_vix = vix_exposures.nlargest(3).index
-                low_vix = vix_exposures.nsmallest(3).index
-
-                for high_asset_col in high_vix:
-                    for low_asset_col in low_vix:
-                        high_asset = extract_asset(high_asset_col)
-                        low_asset = extract_asset(low_asset_col)
-                        if (
-                            high_asset != low_asset
-                            and high_asset in assets
-                            and low_asset in assets
-                        ):
-                            # Prevent duplicate views
-                            view_pair = tuple(sorted([high_asset, low_asset]))
-                            if view_pair in view_pairs:
-                                continue
-                            view_pairs.add(view_pair)
-
-                            p_row = np.zeros(len(assets))
-                            p_row[assets.index(high_asset)] = 1
-                            p_row[assets.index(low_asset)] = -1
-
-                            views.append(p_row)
-                            # Scale return using Information Coefficient and factor volatility
-                            factor_name = "^VIX"
-                            ic_value = ic_values.get(
-                                factor_name, 0.1
-                            )  # Default IC if not available
-                            avg_exposure = abs(vix_exposures.mean())
-
-                            # IC-based scaling: higher IC = stronger views
-                            # Base monthly return: 1% with IC adjustment
-                            base_return = 0.01 * abs(ic_value) * regime_multiplier
-                            scaled_return = base_return * max(avg_exposure, 0.01)
-
-                            view_returns.append(adjusted_view_strength * scaled_return)
-                            view_uncertainties.append(
-                                0.5 * abs(adjusted_view_strength * scaled_return)
-                            )
-
-        # View 5: Enhanced Sentiment-based Views
-        if sentiment_scores is not None:
-            latest_sentiment = (
-                sentiment_scores.iloc[-1] if not sentiment_scores.empty else None
-            )
-            if latest_sentiment is not None:
-                # Create views based on sentiment extremes
-                high_sentiment = latest_sentiment.nlargest(2).index
-                low_sentiment = latest_sentiment.nsmallest(2).index
-
-                for high_asset in high_sentiment:
-                    for low_asset in low_sentiment:
-                        if (
-                            high_asset != low_asset
-                            and high_asset in assets
-                            and low_asset in assets
-                        ):
-                            # Prevent duplicate views
-                            view_pair = tuple(sorted([high_asset, low_asset]))
-                            if view_pair in view_pairs:
-                                continue
-                            view_pairs.add(view_pair)
-
-                            p_row = np.zeros(len(assets))
-                            p_row[assets.index(high_asset)] = 1
-                            p_row[assets.index(low_asset)] = -1
-
-                            views.append(p_row)
-                            # Regime-aware sentiment view: 0.6% monthly return (7.2% annual)
-                            sentiment_return = 0.006 * regime_multiplier
-                            view_returns.append(
-                                adjusted_view_strength * sentiment_return
-                            )
-                            view_uncertainties.append(
-                                0.5 * abs(adjusted_view_strength * sentiment_return)
-                            )
+                                view_returns.append(adjusted_view_strength * scaled_return)
+                                view_uncertainties.append(
+                                    0.5 * abs(adjusted_view_strength * scaled_return)
+                                )
 
         if not views:
             logger.warning("No factor timing views created")
@@ -626,23 +626,9 @@ class BlackLittermanOptimizer:
         # Convert to numpy arrays
         P = np.array(views)
         Q = np.array(view_returns)
-        # Convert standard deviations to variances for Black-Litterman Omega matrix
-        view_variances = [uncertainty**2 for uncertainty in view_uncertainties]
-        # Prevent singularity by ensuring minimum variance
-        view_variances = np.maximum(view_variances, 1e-6)
-        Omega = np.diag(view_variances)
+        Omega = np.diag(view_uncertainties)
 
         logger.info(f"Created {len(views)} factor timing views")
-
-        # Diagnostic logging for views
-        if views:
-            logger.info(f"View returns (Q): {view_returns}")
-            logger.info(f"Mean view return: {np.mean(view_returns):.6f}")
-            logger.info(f"View uncertainties (Omega diagonal): {view_uncertainties}")
-        else:
-            logger.warning(
-                "No factor timing views created - using equilibrium returns only"
-            )
 
         return P, Q, Omega
 
