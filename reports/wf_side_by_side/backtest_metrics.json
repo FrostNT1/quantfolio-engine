@@ -1,0 +1,23 @@
+{
+  "total_periods": 86,
+  "avg_total_return": 0.012157760120097658,
+  "avg_sharpe_ratio": 0.0,
+  "avg_calmar_ratio": 0.0,
+  "worst_max_drawdown": 0.0,
+  "avg_volatility": 0.0,
+  "hit_ratio": 0.6046511627906976,
+  "benchmark_avg_return": 0.006517604093961012,
+  "benchmark_avg_sharpe": 0.0,
+  "excess_return": 0.005640156026136645,
+  "excess_sharpe": 0.0,
+  "total_transaction_costs": 0.0050354652287786066,
+  "avg_transaction_cost": 5.8551921264867516e-05,
+  "total_turnover": 6.472216062960701,
+  "avg_turnover": 0.07525832631349652,
+  "net_total_return": 0.012099208198832794,
+  "avg_return_annual": 0.0,
+  "avg_volatility_annual": 0.0,
+  "avg_sharpe_ratio_annual": 0.0,
+  "avg_sortino_ratio_annual": 0.0,
+  "avg_sortino_ratio": 0.3865289928191203
+}

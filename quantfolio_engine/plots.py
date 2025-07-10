@@ -47,16 +47,29 @@ def plot_backtest_results(
         color="blue",
     )
 
-    if benchmark_df is not None and "benchmark_total_return" in performance_df.columns:
-        benchmark_cumulative = (1 + performance_df["benchmark_total_return"]).cumprod()
-        ax1.plot(
-            benchmark_cumulative.index,
-            benchmark_cumulative.values,
-            label="Benchmark",
-            linewidth=2,
-            color="red",
-            linestyle="--",
-        )
+    # Plot all three benchmarks
+    benchmark_colors = ["red", "green", "orange"]
+    benchmark_labels = ["60/40 SPY/TLT", "SPY", "TLT"]
+    benchmark_columns = [
+        "benchmark_6040_total_return",
+        "benchmark_spy_total_return",
+        "benchmark_tlt_total_return",
+    ]
+
+    for i, (col, label, color) in enumerate(
+        zip(benchmark_columns, benchmark_labels, benchmark_colors)
+    ):
+        if col in performance_df.columns:
+            benchmark_cumulative = (1 + performance_df[col]).cumprod()
+            ax1.plot(
+                benchmark_cumulative.index,
+                benchmark_cumulative.values,
+                label=label,
+                linewidth=2,
+                color=color,
+                linestyle="--" if i == 0 else "-",
+                alpha=0.8,
+            )
 
     ax1.set_title("Cumulative Returns")
     ax1.set_ylabel("Cumulative Return")
@@ -162,48 +175,69 @@ def plot_performance_comparison(
 
     # 1. Returns Comparison
     ax1 = axes[0, 0]
-    if (
-        "total_return" in performance_df.columns
-        and "benchmark_total_return" in performance_df.columns
-    ):
-        x = range(len(performance_df))
+    x = range(len(performance_df))
+    width = 0.18
+    # Portfolio
+    if "total_return" in performance_df.columns:
         ax1.bar(
-            [i - 0.2 for i in x],
+            [i - 0.27 for i in x],
             performance_df["total_return"],
-            width=0.4,
+            width=width,
             label="Portfolio",
-            alpha=0.7,
             color="blue",
+            alpha=0.8,
         )
-        ax1.bar(
-            [i + 0.2 for i in x],
-            performance_df["benchmark_total_return"],
-            width=0.4,
-            label="Benchmark",
-            alpha=0.7,
-            color="red",
-        )
-        ax1.set_title("Period Returns Comparison")
-        ax1.set_ylabel("Return")
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
+    # Benchmarks
+    benchmarks = [
+        ("benchmark_6040_total_return", "60/40 SPY/TLT", "red", -0.09),
+        ("benchmark_spy_total_return", "SPY", "green", 0.09),
+        ("benchmark_tlt_total_return", "TLT", "orange", 0.27),
+    ]
+    for col, label, color, offset in benchmarks:
+        if col in performance_df.columns:
+            ax1.bar(
+                [i + offset for i in x],
+                performance_df[col],
+                width=width,
+                label=label,
+                color=color,
+                alpha=0.7,
+            )
+    ax1.set_title("Period Returns Comparison")
+    ax1.set_ylabel("Return")
+    ax1.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
+    ax1.grid(True, alpha=0.3)
 
     # 2. Sharpe Ratio Comparison
     ax2 = axes[0, 1]
-    if (
-        "sharpe_ratio" in performance_df.columns
-        and "benchmark_sharpe_ratio" in performance_df.columns
-    ):
-        ax2.scatter(
-            performance_df["benchmark_sharpe_ratio"],
-            performance_df["sharpe_ratio"],
-            alpha=0.6,
-            color="green",
-        )
-        ax2.plot([-2, 2], [-2, 2], "r--", alpha=0.5)  # 45-degree line
+    if "sharpe_ratio" in performance_df.columns:
+        benchmark_colors = ["red", "green", "orange"]
+        benchmark_labels = ["60/40 SPY/TLT", "SPY", "TLT"]
+        benchmark_columns = [
+            "benchmark_6040_sharpe_ratio",
+            "benchmark_spy_sharpe_ratio",
+            "benchmark_tlt_sharpe_ratio",
+        ]
+
+        for col, label, color in zip(
+            benchmark_columns, benchmark_labels, benchmark_colors
+        ):
+            if col in performance_df.columns:
+                ax2.scatter(
+                    performance_df[col],
+                    performance_df["sharpe_ratio"],
+                    alpha=0.6,
+                    color=color,
+                    label=label,
+                    s=50,
+                )
+
+        # Add 45-degree line
+        ax2.plot([-2, 2], [-2, 2], "k--", alpha=0.5, label="Equal Performance")
         ax2.set_xlabel("Benchmark Sharpe Ratio")
         ax2.set_ylabel("Portfolio Sharpe Ratio")
         ax2.set_title("Sharpe Ratio Comparison")
+        ax2.legend()
         ax2.grid(True, alpha=0.3)
 
     # 3. Risk-Return Scatter
@@ -225,27 +259,178 @@ def plot_performance_comparison(
 
     # 4. Hit Rate Analysis
     ax4 = axes[1, 1]
-    if (
-        "total_return" in performance_df.columns
-        and "benchmark_total_return" in performance_df.columns
-    ):
-        outperformance = (
-            performance_df["total_return"] > performance_df["benchmark_total_return"]
-        )
-        hit_rate = outperformance.mean()
-        ax4.pie(
-            [hit_rate, 1 - hit_rate],
-            labels=["Outperform", "Underperform"],
-            autopct="%1.1f%%",
-            colors=["green", "red"],
-        )
-        ax4.set_title(f"Hit Rate: {hit_rate:.1%}")
+    if "total_return" in performance_df.columns:
+        benchmark_columns = [
+            "benchmark_6040_total_return",
+            "benchmark_spy_total_return",
+            "benchmark_tlt_total_return",
+        ]
+        benchmark_labels = ["60/40 SPY/TLT", "SPY", "TLT"]
+
+        hit_rates = []
+        available_labels = []
+
+        for col, label in zip(benchmark_columns, benchmark_labels):
+            if col in performance_df.columns:
+                outperformance = performance_df["total_return"] > performance_df[col]
+                hit_rate = outperformance.mean()
+                hit_rates.append(hit_rate)
+                available_labels.append(f"{label}\n{hit_rate:.1%}")
+
+        if hit_rates:
+            colors = ["green", "blue", "orange"]
+            ax4.pie(
+                hit_rates,
+                labels=available_labels,
+                autopct="%1.1f%%",
+                colors=colors[: len(hit_rates)],
+                startangle=90,
+            )
+            ax4.set_title("Hit Rate vs Benchmarks")
 
     plt.tight_layout()
 
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
         logger.success(f"Performance comparison plot saved to {save_path}")
+
+    plt.show()
+
+
+def plot_benchmark_comparison(
+    performance_df: pd.DataFrame,
+    save_path: Optional[str] = None,
+    figsize: Tuple[int, int] = (15, 10),
+) -> None:
+    """
+    Plot comprehensive benchmark comparison with all three benchmarks.
+
+    Args:
+        performance_df: DataFrame with performance data including all benchmarks
+        save_path: Optional path to save the plot
+        figsize: Figure size (width, height)
+    """
+    plt.style.use("seaborn-v0_8")
+
+    fig, axes = plt.subplots(2, 2, figsize=figsize)
+    fig.suptitle(
+        "Multi-Benchmark Performance Comparison", fontsize=16, fontweight="bold"
+    )
+
+    # 1. Cumulative Returns Comparison
+    ax1 = axes[0, 0]
+    portfolio_cumulative = (1 + performance_df["total_return"]).cumprod()
+    ax1.plot(
+        portfolio_cumulative.index,
+        portfolio_cumulative.values,
+        label="Portfolio",
+        linewidth=3,
+        color="blue",
+    )
+
+    benchmark_colors = ["red", "green", "orange"]
+    benchmark_labels = ["60/40 SPY/TLT", "SPY", "TLT"]
+    benchmark_columns = [
+        "benchmark_6040_total_return",
+        "benchmark_spy_total_return",
+        "benchmark_tlt_total_return",
+    ]
+
+    for col, label, color in zip(benchmark_columns, benchmark_labels, benchmark_colors):
+        if col in performance_df.columns:
+            benchmark_cumulative = (1 + performance_df[col]).cumprod()
+            ax1.plot(
+                benchmark_cumulative.index,
+                benchmark_cumulative.values,
+                label=label,
+                linewidth=2,
+                color=color,
+                linestyle="--",
+                alpha=0.8,
+            )
+
+    ax1.set_title("Cumulative Returns Comparison")
+    ax1.set_ylabel("Cumulative Return")
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+
+    # 2. Excess Returns Over Time
+    ax2 = axes[0, 1]
+    for col, label, color in zip(benchmark_columns, benchmark_labels, benchmark_colors):
+        if col in performance_df.columns:
+            excess_returns = performance_df["total_return"] - performance_df[col]
+            ax2.plot(
+                excess_returns.index,
+                excess_returns.cumsum(),
+                label=f"vs {label}",
+                color=color,
+                linewidth=2,
+            )
+
+    ax2.axhline(y=0, color="black", linestyle="-", alpha=0.3)
+    ax2.set_title("Cumulative Excess Returns")
+    ax2.set_ylabel("Cumulative Excess Return")
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+
+    # 3. Sharpe Ratio Comparison
+    ax3 = axes[1, 0]
+    if "sharpe_ratio" in performance_df.columns:
+        benchmark_sharpe_cols = [
+            "benchmark_6040_sharpe_ratio",
+            "benchmark_spy_sharpe_ratio",
+            "benchmark_tlt_sharpe_ratio",
+        ]
+
+        for col, label, color in zip(
+            benchmark_sharpe_cols, benchmark_labels, benchmark_colors
+        ):
+            if col in performance_df.columns:
+                ax3.scatter(
+                    performance_df[col],
+                    performance_df["sharpe_ratio"],
+                    alpha=0.6,
+                    color=color,
+                    label=label,
+                    s=50,
+                )
+
+        ax3.plot([-2, 2], [-2, 2], "k--", alpha=0.5, label="Equal Performance")
+        ax3.set_xlabel("Benchmark Sharpe Ratio")
+        ax3.set_ylabel("Portfolio Sharpe Ratio")
+        ax3.set_title("Sharpe Ratio Comparison")
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+
+    # 4. Hit Rate Analysis
+    ax4 = axes[1, 1]
+    if "total_return" in performance_df.columns:
+        hit_rates = []
+        available_labels = []
+
+        for col, label in zip(benchmark_columns, benchmark_labels):
+            if col in performance_df.columns:
+                outperformance = performance_df["total_return"] > performance_df[col]
+                hit_rate = outperformance.mean()
+                hit_rates.append(hit_rate)
+                available_labels.append(f"{label}\n{hit_rate:.1%}")
+
+        if hit_rates:
+            colors = ["green", "blue", "orange"]
+            ax4.pie(
+                hit_rates,
+                labels=available_labels,
+                autopct="%1.1f%%",
+                colors=colors[: len(hit_rates)],
+                startangle=90,
+            )
+            ax4.set_title("Hit Rate vs Benchmarks")
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        logger.success(f"Benchmark comparison plot saved to {save_path}")
 
     plt.show()
 
@@ -359,18 +544,33 @@ def plot_aggregate_metrics(
     ax3.set_ylabel("Cost")
     ax3.grid(True, alpha=0.3)
 
-    # 4. Turnover Metrics
+    # 4. Benchmark Comparison
     ax4 = axes[1, 1]
-    turnover_metrics = ["total_turnover", "avg_turnover"]
-    turnover_names = ["Total Turnover", "Avg Turnover/Period"]
-    turnover_values = [metrics.get(metric, 0) for metric in turnover_metrics]
+    benchmark_metrics = [
+        "excess_return_vs_6040",
+        "excess_return_vs_spy",
+        "excess_return_vs_tlt",
+    ]
+    benchmark_names = ["vs 60/40", "vs SPY", "vs TLT"]
+    benchmark_values = [metrics.get(metric, 0) for metric in benchmark_metrics]
+    benchmark_colors = ["red", "green", "orange"]
 
-    ax4.bar(
-        turnover_names, turnover_values, color=["darkgreen", "lightgreen"], alpha=0.7
-    )
-    ax4.set_title("Portfolio Turnover")
-    ax4.set_ylabel("Turnover")
+    bars = ax4.bar(benchmark_names, benchmark_values, color=benchmark_colors, alpha=0.7)
+    ax4.set_title("Excess Returns vs Benchmarks")
+    ax4.set_ylabel("Excess Return")
+    ax4.axhline(y=0, color="black", linestyle="-", alpha=0.3)
     ax4.grid(True, alpha=0.3)
+
+    # Add value labels on bars
+    for bar, value in zip(bars, benchmark_values):
+        height = bar.get_height()
+        ax4.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            height + (0.001 if height >= 0 else -0.001),
+            f"{value:.3f}",
+            ha="center",
+            va="bottom" if height >= 0 else "top",
+        )
 
     plt.tight_layout()
 
@@ -383,56 +583,54 @@ def plot_aggregate_metrics(
 
 def plot_return_distribution(
     performance_df: pd.DataFrame,
-    save_path: str = None,
+    save_path: Optional[str] = None,
     bins: int = 30,
     figsize: tuple = (10, 6),
 ) -> None:
     """
-    Plot histogram comparing the distribution of portfolio and benchmark returns.
-
-    Args:
-        performance_df: DataFrame with 'total_return' and 'benchmark_total_return' columns
-        save_path: Optional path to save the plot
-        bins: Number of bins for the histogram
-        figsize: Figure size
+    Plot histogram and KDE of period returns for portfolio and benchmarks.
     """
     import matplotlib.pyplot as plt
     import seaborn as sns
 
+    plt.figure(figsize=figsize)
     plt.style.use("seaborn-v0_8")
 
-    fig, ax = plt.subplots(figsize=figsize)
-
+    # Portfolio
     if "total_return" in performance_df.columns:
         sns.histplot(
             performance_df["total_return"],
             bins=bins,
+            kde=True,
             color="blue",
             label="Portfolio",
-            kde=True,
             stat="density",
-            alpha=0.6,
-            ax=ax,
-        )
-    if "benchmark_total_return" in performance_df.columns:
-        sns.histplot(
-            performance_df["benchmark_total_return"],
-            bins=bins,
-            color="red",
-            label="Benchmark",
-            kde=True,
-            stat="density",
-            alpha=0.4,
-            ax=ax,
+            alpha=0.5,
         )
 
-    ax.set_title("Distribution of Returns: Portfolio vs Benchmark")
-    ax.set_xlabel("Return per Period")
-    ax.set_ylabel("Density")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
+    # Benchmarks
+    benchmark_info = [
+        ("benchmark_6040_total_return", "60/40 SPY/TLT", "red"),
+        ("benchmark_spy_total_return", "SPY", "green"),
+        ("benchmark_tlt_total_return", "TLT", "orange"),
+    ]
+    for col, label, color in benchmark_info:
+        if col in performance_df.columns:
+            sns.histplot(
+                performance_df[col],
+                bins=bins,
+                kde=True,
+                color=color,
+                label=label,
+                stat="density",
+                alpha=0.4,
+            )
 
+    plt.title("Distribution of Returns: Portfolio vs Benchmarks")
+    plt.xlabel("Period Return")
+    plt.ylabel("Density")
+    plt.legend()
+    plt.tight_layout()
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
-        logger.success(f"Return distribution plot saved to {save_path}")
     plt.show()

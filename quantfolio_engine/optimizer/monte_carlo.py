@@ -18,12 +18,24 @@ import pandas as pd
 from quantfolio_engine.config import ASSET_UNIVERSE
 
 
+def set_log_level(debug: bool):
+    from loguru import logger
+
+    logger.remove()
+    logger.add(
+        lambda msg: print(msg, end=""),
+        level="DEBUG" if debug else "INFO",
+        colorize=True,
+    )
+
+
+# Assuming the main class is MonteCarloOptimizer (if not, adjust accordingly)
 class MonteCarloOptimizer:
     """
-    Monte Carlo portfolio optimization with single-regime scenarios.
+    Monte Carlo portfolio optimizer.
 
-    Simulates portfolio performance under a single regime and optimizes
-    for risk-adjusted returns with constraints.
+    Args:
+        debug (bool): If True, sets logger to DEBUG level for verbose output. Default is False.
     """
 
     def __init__(
@@ -37,6 +49,7 @@ class MonteCarloOptimizer:
         use_cvar: bool = True,
         time_basis: str = "monthly",  # Time basis for all calculations
         random_state: Optional[int] = None,
+        debug: bool = False,
     ):
         """
         Initialize Monte Carlo optimizer.
@@ -50,7 +63,9 @@ class MonteCarloOptimizer:
             risk_aversion: Risk aversion parameter for optimization (annualized)
             use_cvar: Whether to use CVaR constraint
             random_state: Random seed for reproducibility
+            debug: If True, sets logger to DEBUG level for verbose output. Default is False.
         """
+        set_log_level(debug)
         self.n_simulations = n_simulations
         self.time_horizon = time_horizon
         self.risk_free_rate = risk_free_rate
@@ -90,8 +105,16 @@ class MonteCarloOptimizer:
         """
         logger.info(f"Generating {self.n_simulations} Monte Carlo scenarios...")
 
-        mu = returns_df.mean().values
-        n_assets = returns_df.shape[1]
+        # Clean data first to handle NaNs consistently
+        clean_returns = returns_df.dropna()
+        if len(clean_returns) < len(returns_df):
+            logger.warning(
+                f"Removed {len(returns_df) - len(clean_returns)} rows with NaN values"
+            )
+
+        mu = clean_returns.mean().values
+        n_assets = clean_returns.shape[1]
+
         # Guard for large universes
         if n_assets > 100:
             logger.warning(
@@ -99,11 +122,11 @@ class MonteCarloOptimizer:
             )
             from sklearn.covariance import LedoitWolf
 
-            sigma = LedoitWolf().fit(returns_df.values).covariance_ + 1e-6 * np.eye(
+            sigma = LedoitWolf().fit(clean_returns.values).covariance_ + 1e-6 * np.eye(
                 n_assets
             )
         else:
-            sigma = returns_df.cov().values + 1e-6 * np.eye(n_assets)
+            sigma = clean_returns.cov().values + 1e-6 * np.eye(n_assets)
 
         scenarios = self.rng.multivariate_normal(
             mu, sigma, size=(self.n_simulations, self.time_horizon)
@@ -140,14 +163,24 @@ class MonteCarloOptimizer:
         if sector_limits and asset_names is None:
             raise ValueError("asset_names must be supplied when sector_limits are used")
 
+        # FIXED: Use consistent horizon approach - aggregate to path-level returns
         if scenarios.ndim == 3:
-            mu = np.mean(scenarios, axis=(0, 1))
-            cov = np.cov(scenarios.reshape(-1, scenarios.shape[-1]).T)
+            # Calculate path-level returns: (1 + r1) * (1 + r2) * ... * (1 + rT) - 1
+            path_returns = np.prod(1 + scenarios, axis=1) - 1
+            mu = np.mean(path_returns, axis=0)  # Mean across scenarios
+            cov = np.cov(path_returns.T)  # Covariance across scenarios
+            logger.info("Using path-level (horizon) returns for optimization")
         else:
             mu = np.mean(scenarios, axis=0)
             cov = np.cov(scenarios.T)
+            logger.info("Using single-period returns for optimization")
 
-        annualization_factor = 12
+        # Annualize path-level returns (1 year horizon, not ×12)
+        if scenarios.ndim == 3:
+            annualization_factor = 1  # Path returns are already annual
+        else:
+            annualization_factor = 12  # Monthly returns need annualization
+
         annualized_mean = mu * annualization_factor
         annualized_cov = cov * annualization_factor
         logger.info(
@@ -159,9 +192,10 @@ class MonteCarloOptimizer:
 
         w = cp.Variable(n_assets)
 
-        # Risk aversion is now interpreted as annual
+        # FIXED: Use excess returns in objective for consistency with Sharpe ratio
+        excess_returns = annualized_mean_1d - self.rf_annual
         objective = cp.Maximize(
-            cp.sum(cp.multiply(annualized_mean_1d, w))
+            cp.sum(cp.multiply(excess_returns, w))
             - 0.5 * self.risk_aversion * cp.quad_form(w, annualized_cov)
         )
 
@@ -171,6 +205,7 @@ class MonteCarloOptimizer:
         ]
 
         if target_return is not None:
+            # FIXED: target_return is already annual, no need to multiply
             constraints_list.append(
                 cp.sum(cp.multiply(annualized_mean_1d, w)) >= target_return
             )
@@ -178,29 +213,45 @@ class MonteCarloOptimizer:
             constraints_list.append(
                 cp.quad_form(w, annualized_cov) <= max_volatility**2
             )
-        # CVaR constraint on terminal wealth (not mean path loss)
+
+        # FIXED: CVaR constraint with proper sample size validation
         if self.use_cvar and self.max_cvar_loss is not None:
             N = scenarios.shape[0]
-            if N > 5000:
-                logger.warning(
-                    f"Large scenario set ({N}), downsampling to 5000 for CVaR"
-                )
-                idx = self.rng.choice(N, 5000, replace=False)
-                scenarios_small = scenarios[idx]
-                N = 5000
-            else:
-                scenarios_small = scenarios
 
-            # Calculate terminal wealth for each scenario
-            # Shape: (n_scenarios, n_assets) - cumulative returns over time horizon
-            terminal_returns = np.prod(1 + scenarios_small, axis=1) - 1
-            losses = -terminal_returns @ w  # Portfolio terminal losses
-            alpha = self.confidence_level
-            t = cp.Variable()
-            z = cp.Variable(N)
-            CVAR = t + (1 / (1 - alpha) / N) * cp.sum(z)
-            constraints_list += [z >= losses - t, z >= 0]
-            constraints_list.append(CVAR <= self.max_cvar_loss)
+            # Validate sample size for CVaR
+            min_samples = int(1 / (1 - self.confidence_level)) + 1
+            if N < min_samples:
+                logger.warning(
+                    f"CVaR sample size {N} < {min_samples} required for {self.confidence_level:.0%} confidence. "
+                    f"Skipping CVaR constraint."
+                )
+                # FIXED: Skip CVaR constraint entirely instead of trying to build VaR proxy
+                # (VaR constraint would require CVXPY-compatible variables which is complex)
+            else:
+                if N > 5000:
+                    logger.warning(
+                        f"Large scenario set ({N}), downsampling to 5000 for CVaR"
+                    )
+                    idx = self.rng.choice(N, 5000, replace=False)
+                    scenarios_small = scenarios[idx]
+                    N = 5000
+                else:
+                    scenarios_small = scenarios
+
+                # FIXED: Consistent horizon - use path-level returns for CVaR
+                if scenarios.ndim == 3:
+                    terminal_returns = np.prod(1 + scenarios_small, axis=1) - 1
+                else:
+                    terminal_returns = scenarios_small
+
+                losses = -terminal_returns @ w  # Portfolio terminal losses
+                alpha = self.confidence_level
+                t = cp.Variable()
+                z = cp.Variable(N)
+                CVAR = t + (1 / (1 - alpha) / N) * cp.sum(z)
+                constraints_list += [z >= losses - t, z >= 0]
+                constraints_list.append(CVAR <= self.max_cvar_loss)
+
         if sector_limits and asset_names is not None:
             for sector, limit in sector_limits.items():
                 sector_assets = [
@@ -260,40 +311,60 @@ class MonteCarloOptimizer:
         Returns:
             Dictionary with portfolio metrics
         """
-        # Portfolio returns for each scenario and time period
-        # Shape: (n_simulations, time_horizon)
-        portfolio_returns = np.sum(scenarios * weights, axis=-1)
-
-        # Calculate metrics across all scenarios and time periods
-        # Always annualize monthly data to annual
-        annualization_factor = 12
-        volatility_scale = np.sqrt(annualization_factor)
+        # FIXED: Handle path-level vs monthly returns correctly
+        if scenarios.ndim == 3:
+            # Path-level returns: collapse time dimension first
+            path_returns = np.prod(1 + scenarios, axis=1) - 1  # (N, n_assets)
+            portfolio_returns = path_returns @ weights  # (N,) - one return per scenario
+            annualization_factor = 1  # Already annual
+            volatility_scale = 1  # Already annual
+            logger.info("Calculating metrics from path-level (annual) returns")
+        else:
+            # Monthly returns: need annualization
+            portfolio_returns = np.sum(scenarios * weights, axis=-1)
+            annualization_factor = 12  # Annualize monthly data
+            volatility_scale = np.sqrt(annualization_factor)  # Annualize volatility
+            logger.info("Calculating metrics from monthly returns (annualizing)")
 
         raw_mean = np.mean(portfolio_returns)
-        expected_return = raw_mean * annualization_factor  # Annualize
-        volatility = np.std(portfolio_returns) * volatility_scale  # Annualize
+        expected_return = raw_mean * annualization_factor  # Annualize if needed
+        volatility = np.std(portfolio_returns) * volatility_scale  # Annualize if needed
 
         sharpe_ratio = (expected_return - self.risk_free_rate) / volatility
 
         # Calculate maximum drawdown across time periods for each scenario
         max_drawdowns = []
-        for scenario_returns in portfolio_returns:
-            cumulative_returns = np.cumprod(1 + scenario_returns)
-            running_max = np.maximum.accumulate(cumulative_returns)
-            drawdowns = (cumulative_returns - running_max) / running_max
-            max_drawdowns.append(np.min(drawdowns))
+        if scenarios.ndim == 3:
+            # For path-level returns, drawdown is already computed over the full path
+            for scenario_returns in scenarios:
+                # Compute cumulative returns over time for this scenario
+                scenario_portfolio_returns = np.sum(
+                    scenario_returns * weights, axis=-1
+                )  # (T,)
+                cumulative_returns = np.cumprod(1 + scenario_portfolio_returns)
+                running_max = np.maximum.accumulate(cumulative_returns)
+                drawdowns = (cumulative_returns - running_max) / running_max
+                max_drawdowns.append(np.min(drawdowns))
+        else:
+            # For monthly returns, compute drawdown across time periods
+            for scenario_returns in portfolio_returns:
+                cumulative_returns = np.cumprod(1 + scenario_returns)
+                running_max = np.maximum.accumulate(cumulative_returns)
+                drawdowns = (cumulative_returns - running_max) / running_max
+                max_drawdowns.append(np.min(drawdowns))
 
         max_drawdown = np.mean(max_drawdowns)  # Average across scenarios
 
-        # Calculate VaR across all returns
+        # FIXED: Label VaR properly based on input type
         var_95 = np.percentile(portfolio_returns.flatten(), 5)
+        # var_label = "annual VaR" if scenarios.ndim == 3 else "1-month VaR"  # Unused variable, remove
 
         return {
             "expected_return": expected_return,
             "volatility": volatility,
             "sharpe_ratio": sharpe_ratio,
             "max_drawdown": max_drawdown,
-            "var_95": var_95,
+            "var_95": var_95,  # This is {var_label}
         }
 
     def generate_efficient_frontier(
@@ -317,16 +388,25 @@ class MonteCarloOptimizer:
         """
         logger.info(f"Generating efficient frontier with {n_points} points...")
 
-        # Handle 3D scenarios: (n_simulations, time_horizon, n_assets)
+        # FIXED: Use consistent horizon approach for frontier generation
         if scenarios.ndim == 3:
-            mu = np.mean(scenarios, axis=(0, 1))
+            # Use path-level returns for frontier
+            path_returns = np.prod(1 + scenarios, axis=1) - 1
+            mu = np.mean(path_returns, axis=0)
         else:
             mu = np.mean(scenarios, axis=0)
 
-        # Generate target returns
+        # FIXED: Generate target returns in annual units
         min_return = np.min(mu)
         max_return = np.max(mu)
-        target_returns = np.linspace(min_return, max_return, n_points)
+
+        # Scale to annual returns if using monthly data
+        if scenarios.ndim == 3:
+            # Path returns are already annual
+            target_returns = np.linspace(min_return, max_return, n_points)
+        else:
+            # Monthly returns need annualization
+            target_returns = np.linspace(min_return * 12, max_return * 12, n_points)
 
         frontier_returns = []
         frontier_volatilities = []

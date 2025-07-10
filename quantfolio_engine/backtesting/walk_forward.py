@@ -17,16 +17,23 @@ from quantfolio_engine.optimizer.portfolio_engine import PortfolioOptimizationEn
 from .data_validator import DataValidator
 
 
+def set_log_level(debug: bool):
+    from loguru import logger
+
+    logger.remove()
+    logger.add(
+        lambda msg: print(msg, end=""),
+        level="DEBUG" if debug else "INFO",
+        colorize=True,
+    )
+
+
 class WalkForwardBacktester:
     """
     Walk-forward backtesting framework.
 
-    Implements:
-    - Configurable train/test windows
-    - Multiple rebalance frequencies
-    - Transaction cost modeling
-    - Performance tracking
-    - Benchmark comparison
+    Args:
+        debug (bool): If True, sets logger to DEBUG level for verbose output. Default is False.
     """
 
     def __init__(
@@ -40,21 +47,9 @@ class WalkForwardBacktester:
         min_weight: float = 0.05,
         max_volatility: float = 0.15,
         random_state: Optional[int] = None,
+        debug: bool = False,
     ):
-        """
-        Initialize walk-forward backtester.
-
-        Args:
-            train_years: Years of data to use for training
-            test_years: Years of data to use for testing
-            rebalance_frequency: Rebalance frequency ('monthly', 'quarterly', 'annual')
-            transaction_costs: Transaction costs by asset type (bps)
-            risk_free_rate: Annual risk-free rate
-            max_weight: Maximum weight per asset
-            min_weight: Minimum weight per asset
-            max_volatility: Maximum portfolio volatility
-            random_state: Random seed for reproducibility
-        """
+        set_log_level(debug)
         self.train_years = train_years
         self.test_years = test_years
         self.rebalance_frequency = rebalance_frequency
@@ -63,6 +58,12 @@ class WalkForwardBacktester:
         self.min_weight = min_weight
         self.max_volatility = max_volatility
         self.random_state = random_state
+
+        # Data frequency and periods per year (will be set when data is provided)
+        self.data_frequency: str = (
+            "monthly"  # Default value, will be updated by _infer_data_frequency
+        )
+        self.periods_per_year = 12  # Default to monthly if not inferred
 
         # Set default transaction costs if not provided
         if transaction_costs is None:
@@ -80,6 +81,7 @@ class WalkForwardBacktester:
         self.data_validator = DataValidator(
             min_training_years=train_years,
             min_testing_years=test_years,
+            rebalance_frequency=rebalance_frequency,
         )
 
         # Performance tracking
@@ -111,6 +113,9 @@ class WalkForwardBacktester:
             Dictionary with backtest results
         """
         logger.info(f"Starting walk-forward backtest with {method} method...")
+
+        # 0. Infer data frequency and set periods per year
+        self._infer_data_frequency(returns_df)
 
         # 1. Validate data
         is_valid, validation_messages = (
@@ -185,7 +190,8 @@ class WalkForwardBacktester:
                 f"Rebalance {i+1}/{len(rebalance_dates)}: {rebalance_date.date()}"
             )
             # Get training data (expanding window)
-            train_end = rebalance_date
+            # FIXED: Prevent peeking by ensuring train_end is before test_start
+            train_end = rebalance_date - pd.Timedelta(days=1)
             train_start = returns_df.index.min()
             train_data = self._get_training_data(
                 returns_df,
@@ -197,9 +203,10 @@ class WalkForwardBacktester:
                 train_end,
             )
             # Get testing data (next period)
-            test_start = rebalance_date
             test_end = self._get_next_rebalance_date(returns_df, rebalance_date)
-            test_data = self._get_testing_data(returns_df, test_start, test_end)
+            # FIXED: Use index-based slicing to get proper test window with month-end data
+            # Get the slice from rebalance_date to next_reb, then exclude the first row
+            test_data = returns_df.loc[rebalance_date:test_end].iloc[1:]
             if test_data.empty:
                 logger.warning(f"No test data available for {rebalance_date.date()}")
                 continue
@@ -210,11 +217,12 @@ class WalkForwardBacktester:
                     continue
                 # Calculate portfolio returns for transaction cost calculation
                 weights = portfolio_result["weights"]
-                if isinstance(weights, np.ndarray):
-                    weights_array = weights
+                # FIXED: Handle Series alignment properly to prevent silent errors
+                if isinstance(weights, pd.Series):
+                    w = weights
                 else:
-                    weights_array = weights.values
-                portfolio_returns = (test_data * weights_array).sum(axis=1)
+                    w = pd.Series(weights, index=returns_df.columns)
+                portfolio_returns = test_data.mul(w, axis=1).sum(axis=1)
 
                 # Calculate test performance
                 test_performance = self._calculate_test_performance(
@@ -259,6 +267,11 @@ class WalkForwardBacktester:
                     "transaction_cost": tc,
                     "net_total_return": test_performance["total_return"] - tc,
                     "period_returns": portfolio_returns.tolist(),  # Store individual period returns
+                    # Add annualized metrics
+                    "avg_return_annual": test_performance["avg_return_annual"],
+                    "volatility_annual": test_performance["volatility_annual"],
+                    "sharpe_ratio_annual": test_performance["sharpe_ratio_annual"],
+                    "sortino_ratio_annual": test_performance["sortino_ratio_annual"],
                 }
 
                 # Add benchmark performance
@@ -412,15 +425,21 @@ class WalkForwardBacktester:
     ) -> Dict[str, float]:
         """Calculate performance metrics for test period."""
         try:
-            # Calculate metrics using provided portfolio returns
-            total_return = (1 + portfolio_returns).prod() - 1
-            avg_return = portfolio_returns.mean()
-            volatility = portfolio_returns.std()
+            # Define canonical units once per function
+            periods = (
+                self.periods_per_year
+            )  # Based on data frequency, not rebalance frequency
 
-            if volatility > 0:
-                sharpe_ratio = (avg_return - self.risk_free_rate / 12) / volatility
-            else:
-                sharpe_ratio = 0.0
+            # Work in per-period units first
+            total_return = (1 + portfolio_returns).prod() - 1
+            mean_r = portfolio_returns.mean()
+            stdev_r = (
+                0.0 if len(portfolio_returns) < 2 else portfolio_returns.std(ddof=0)
+            )
+            rf_period = self.risk_free_rate / periods
+
+            # Calculate per-period Sharpe ratio
+            sharpe_ratio = (mean_r - rf_period) / stdev_r if stdev_r > 0 else 0.0
 
             # Calculate max drawdown
             cumulative_returns = (1 + portfolio_returns).cumprod()
@@ -431,30 +450,45 @@ class WalkForwardBacktester:
             # Calculate Sortino ratio (downside deviation)
             downside_returns = portfolio_returns[portfolio_returns < 0]
             if len(downside_returns) > 0:
-                downside_deviation = downside_returns.std()
-                if downside_deviation > 0:
-                    sortino_ratio = (
-                        avg_return - self.risk_free_rate / 12
-                    ) / downside_deviation
-                else:
-                    sortino_ratio = 0.0
+                downside_std = (
+                    0.0
+                    if len(downside_returns) < 2
+                    else abs(downside_returns.std(ddof=0))
+                )
+                sortino_ratio = (
+                    (mean_r - rf_period) / downside_std if downside_std > 0 else 0.0
+                )
             else:
                 sortino_ratio = 0.0
+                downside_std = 0.0
 
-            # Calculate Calmar ratio
-            if max_drawdown != 0:
-                calmar_ratio = total_return / abs(max_drawdown)
-            else:
-                calmar_ratio = 0.0
+            # Calculate Calmar ratio (per-period cumulative return / max drawdown)
+            calmar_ratio = (
+                total_return / abs(max_drawdown) if max_drawdown != 0 else 0.0
+            )
+
+            # Annualized versions (only for reporting)
+            # Use linear approximation for annualized return: avg_period_return * periods
+            mean_r_ann = mean_r * periods
+            stdev_r_ann = stdev_r * np.sqrt(periods)
+            sharpe_ratio_annual = sharpe_ratio * np.sqrt(periods)
+
+            # Annualized Sortino ratio (ensure positive)
+            sortino_ratio_annual = abs(sortino_ratio) * np.sqrt(periods)
 
             return {
                 "total_return": total_return,
-                "avg_return": avg_return,
-                "volatility": volatility,
+                "avg_return": mean_r,
+                "volatility": stdev_r,
                 "sharpe_ratio": sharpe_ratio,
                 "sortino_ratio": sortino_ratio,
                 "max_drawdown": max_drawdown,
                 "calmar_ratio": calmar_ratio,
+                # Annualized versions
+                "avg_return_annual": mean_r_ann,
+                "volatility_annual": stdev_r_ann,
+                "sharpe_ratio_annual": sharpe_ratio_annual,
+                "sortino_ratio_annual": sortino_ratio_annual,
             }
 
         except Exception as e:
@@ -467,17 +501,18 @@ class WalkForwardBacktester:
                 "sortino_ratio": 0.0,
                 "max_drawdown": 0.0,
                 "calmar_ratio": 0.0,
+                "avg_return_annual": 0.0,
+                "volatility_annual": 0.0,
+                "sharpe_ratio_annual": 0.0,
+                "sortino_ratio_annual": 0.0,
             }
 
     def _calculate_benchmark_performance(
         self, test_data: pd.DataFrame, rebalance_date: pd.Timestamp
     ) -> Dict[str, float]:
-        """Calculate benchmark performance (60/40 portfolio)."""
+        """Calculate benchmark performance for multiple benchmarks."""
         try:
-            # Simple 60/40 benchmark (60% SPY, 40% TLT if available)
-            benchmark_weights = np.zeros(len(test_data.columns))
-
-            # Find SPY and TLT if available
+            # Find SPY and TLT indices
             spy_idx = None
             tlt_idx = None
             for i, col in enumerate(test_data.columns):
@@ -486,40 +521,203 @@ class WalkForwardBacktester:
                 elif col == "TLT":
                     tlt_idx = i
 
+            periods = self.periods_per_year if self.periods_per_year is not None else 12
+            rf_period = self.risk_free_rate / periods
+            results = {}
+
+            # 1. 60/40 SPY/TLT benchmark
             if spy_idx is not None and tlt_idx is not None:
-                benchmark_weights[spy_idx] = 0.6
-                benchmark_weights[tlt_idx] = 0.4
-            else:
-                # Equal weight if SPY/TLT not available
-                benchmark_weights = np.ones(len(test_data.columns)) / len(
-                    test_data.columns
+                benchmark_weights_6040 = np.zeros(len(test_data.columns))
+                benchmark_weights_6040[spy_idx] = 0.6
+                benchmark_weights_6040[tlt_idx] = 0.4
+                benchmark_returns_6040 = (test_data * benchmark_weights_6040).sum(
+                    axis=1
                 )
 
-            # Calculate benchmark returns
-            benchmark_returns = (test_data * benchmark_weights).sum(axis=1)
+                benchmark_total_return_6040 = (1 + benchmark_returns_6040).prod() - 1
+                benchmark_mean_r_6040 = benchmark_returns_6040.mean()
+                benchmark_stdev_r_6040 = (
+                    0.0
+                    if len(benchmark_returns_6040) < 2
+                    else benchmark_returns_6040.std(ddof=0)
+                )
+                benchmark_sharpe_6040 = (
+                    (benchmark_mean_r_6040 - rf_period) / benchmark_stdev_r_6040
+                    if benchmark_stdev_r_6040 > 0
+                    else 0.0
+                )
 
-            # Calculate benchmark metrics
-            benchmark_total_return = (1 + benchmark_returns).prod() - 1
-            benchmark_avg_return = benchmark_returns.mean()
-            benchmark_volatility = benchmark_returns.std()
-
-            if benchmark_volatility > 0:
-                benchmark_sharpe = (
-                    benchmark_avg_return - self.risk_free_rate / 12
-                ) / benchmark_volatility
+                results.update(
+                    {
+                        "benchmark_6040_total_return": benchmark_total_return_6040,
+                        "benchmark_6040_avg_return": benchmark_mean_r_6040,
+                        "benchmark_6040_volatility": benchmark_stdev_r_6040,
+                        "benchmark_6040_sharpe_ratio": benchmark_sharpe_6040,
+                        # Legacy keys for backward compatibility
+                        "benchmark_total_return": benchmark_total_return_6040,
+                        "benchmark_avg_return": benchmark_mean_r_6040,
+                        "benchmark_volatility": benchmark_stdev_r_6040,
+                        "benchmark_sharpe_ratio": benchmark_sharpe_6040,
+                    }
+                )
             else:
-                benchmark_sharpe = 0.0
+                # Fallback to equal weight if SPY/TLT not available
+                benchmark_weights_6040 = np.ones(len(test_data.columns)) / len(
+                    test_data.columns
+                )
+                benchmark_returns_6040 = (test_data * benchmark_weights_6040).sum(
+                    axis=1
+                )
 
-            return {
-                "benchmark_total_return": benchmark_total_return,
-                "benchmark_avg_return": benchmark_avg_return,
-                "benchmark_volatility": benchmark_volatility,
-                "benchmark_sharpe_ratio": benchmark_sharpe,
-            }
+                benchmark_total_return_6040 = (1 + benchmark_returns_6040).prod() - 1
+                benchmark_mean_r_6040 = benchmark_returns_6040.mean()
+                benchmark_stdev_r_6040 = (
+                    0.0
+                    if len(benchmark_returns_6040) < 2
+                    else benchmark_returns_6040.std(ddof=0)
+                )
+                benchmark_sharpe_6040 = (
+                    (benchmark_mean_r_6040 - rf_period) / benchmark_stdev_r_6040
+                    if benchmark_stdev_r_6040 > 0
+                    else 0.0
+                )
+
+                results.update(
+                    {
+                        "benchmark_6040_total_return": benchmark_total_return_6040,
+                        "benchmark_6040_avg_return": benchmark_mean_r_6040,
+                        "benchmark_6040_volatility": benchmark_stdev_r_6040,
+                        "benchmark_6040_sharpe_ratio": benchmark_sharpe_6040,
+                        # Legacy keys for backward compatibility
+                        "benchmark_total_return": benchmark_total_return_6040,
+                        "benchmark_avg_return": benchmark_mean_r_6040,
+                        "benchmark_volatility": benchmark_stdev_r_6040,
+                        "benchmark_sharpe_ratio": benchmark_sharpe_6040,
+                    }
+                )
+
+            # 2. Equity market benchmark (SPY only)
+            if spy_idx is not None:
+                benchmark_returns_spy = test_data.iloc[:, spy_idx]
+                benchmark_total_return_spy = (1 + benchmark_returns_spy).prod() - 1
+                benchmark_mean_r_spy = benchmark_returns_spy.mean()
+                benchmark_stdev_r_spy = (
+                    0.0
+                    if len(benchmark_returns_spy) < 2
+                    else benchmark_returns_spy.std(ddof=0)
+                )
+                benchmark_sharpe_spy = (
+                    (benchmark_mean_r_spy - rf_period) / benchmark_stdev_r_spy
+                    if benchmark_stdev_r_spy > 0
+                    else 0.0
+                )
+
+                results.update(
+                    {
+                        "benchmark_spy_total_return": benchmark_total_return_spy,
+                        "benchmark_spy_avg_return": benchmark_mean_r_spy,
+                        "benchmark_spy_volatility": benchmark_stdev_r_spy,
+                        "benchmark_spy_sharpe_ratio": benchmark_sharpe_spy,
+                    }
+                )
+            else:
+                # If SPY not available, use first asset as equity proxy
+                benchmark_returns_spy = test_data.iloc[:, 0]
+                benchmark_total_return_spy = (1 + benchmark_returns_spy).prod() - 1
+                benchmark_mean_r_spy = benchmark_returns_spy.mean()
+                benchmark_stdev_r_spy = (
+                    0.0
+                    if len(benchmark_returns_spy) < 2
+                    else benchmark_returns_spy.std(ddof=0)
+                )
+                benchmark_sharpe_spy = (
+                    (benchmark_mean_r_spy - rf_period) / benchmark_stdev_r_spy
+                    if benchmark_stdev_r_spy > 0
+                    else 0.0
+                )
+
+                results.update(
+                    {
+                        "benchmark_spy_total_return": benchmark_total_return_spy,
+                        "benchmark_spy_avg_return": benchmark_mean_r_spy,
+                        "benchmark_spy_volatility": benchmark_stdev_r_spy,
+                        "benchmark_spy_sharpe_ratio": benchmark_sharpe_spy,
+                    }
+                )
+
+            # 3. Treasury benchmark (TLT only)
+            if tlt_idx is not None:
+                benchmark_returns_tlt = test_data.iloc[:, tlt_idx]
+                benchmark_total_return_tlt = (1 + benchmark_returns_tlt).prod() - 1
+                benchmark_mean_r_tlt = benchmark_returns_tlt.mean()
+                benchmark_stdev_r_tlt = (
+                    0.0
+                    if len(benchmark_returns_tlt) < 2
+                    else benchmark_returns_tlt.std(ddof=0)
+                )
+                benchmark_sharpe_tlt = (
+                    (benchmark_mean_r_tlt - rf_period) / benchmark_stdev_r_tlt
+                    if benchmark_stdev_r_tlt > 0
+                    else 0.0
+                )
+
+                results.update(
+                    {
+                        "benchmark_tlt_total_return": benchmark_total_return_tlt,
+                        "benchmark_tlt_avg_return": benchmark_mean_r_tlt,
+                        "benchmark_tlt_volatility": benchmark_stdev_r_tlt,
+                        "benchmark_tlt_sharpe_ratio": benchmark_sharpe_tlt,
+                    }
+                )
+            else:
+                # If TLT not available, use second asset as treasury proxy
+                if len(test_data.columns) > 1:
+                    benchmark_returns_tlt = test_data.iloc[:, 1]
+                else:
+                    benchmark_returns_tlt = test_data.iloc[
+                        :, 0
+                    ]  # Use first asset if only one available
+
+                benchmark_total_return_tlt = (1 + benchmark_returns_tlt).prod() - 1
+                benchmark_mean_r_tlt = benchmark_returns_tlt.mean()
+                benchmark_stdev_r_tlt = (
+                    0.0
+                    if len(benchmark_returns_tlt) < 2
+                    else benchmark_returns_tlt.std(ddof=0)
+                )
+                benchmark_sharpe_tlt = (
+                    (benchmark_mean_r_tlt - rf_period) / benchmark_stdev_r_tlt
+                    if benchmark_stdev_r_tlt > 0
+                    else 0.0
+                )
+
+                results.update(
+                    {
+                        "benchmark_tlt_total_return": benchmark_total_return_tlt,
+                        "benchmark_tlt_avg_return": benchmark_mean_r_tlt,
+                        "benchmark_tlt_volatility": benchmark_stdev_r_tlt,
+                        "benchmark_tlt_sharpe_ratio": benchmark_sharpe_tlt,
+                    }
+                )
+
+            return results
 
         except Exception as e:
             logger.error(f"Error calculating benchmark performance: {str(e)}")
             return {
+                "benchmark_6040_total_return": 0.0,
+                "benchmark_6040_avg_return": 0.0,
+                "benchmark_6040_volatility": 0.0,
+                "benchmark_6040_sharpe_ratio": 0.0,
+                "benchmark_spy_total_return": 0.0,
+                "benchmark_spy_avg_return": 0.0,
+                "benchmark_spy_volatility": 0.0,
+                "benchmark_spy_sharpe_ratio": 0.0,
+                "benchmark_tlt_total_return": 0.0,
+                "benchmark_tlt_avg_return": 0.0,
+                "benchmark_tlt_volatility": 0.0,
+                "benchmark_tlt_sharpe_ratio": 0.0,
+                # Legacy keys for backward compatibility
                 "benchmark_total_return": 0.0,
                 "benchmark_avg_return": 0.0,
                 "benchmark_volatility": 0.0,
@@ -533,27 +731,65 @@ class WalkForwardBacktester:
 
         df = pd.DataFrame(self.performance_history)
 
-        # Calculate aggregate metrics
+        # Calculate aggregate metrics - average per-period metrics, annualize only for final display
+        periods = self.periods_per_year if self.periods_per_year is not None else 12
+
+        # Average per-period metrics
+        avg_period_return = df["avg_return"].mean()
+        avg_period_volatility = df["volatility"].mean(skipna=True)
+        avg_period_sharpe = df["sharpe_ratio"].mean()
+        # avg_period_sortino = df["sortino_ratio"].mean() # Unused variable, remove
+
+        # Annualize for final display
+        avg_annual_return = avg_period_return * periods
+        avg_annual_volatility = avg_period_volatility * np.sqrt(periods)
+        avg_annual_sharpe = avg_period_sharpe * np.sqrt(periods)
+
         aggregate_metrics = {
             "total_periods": len(df),
             "avg_total_return": df["total_return"].mean(),
-            "avg_sharpe_ratio": df["sharpe_ratio"].mean(),
+            "avg_sharpe_ratio": avg_period_sharpe,  # Per-period average
             "avg_calmar_ratio": df["calmar_ratio"].mean(),
             "worst_max_drawdown": df["max_drawdown"].min(),
-            "avg_volatility": df["volatility"].mean(),
+            "avg_volatility": avg_period_volatility,  # Per-period average
             "hit_ratio": (df["total_return"] > 0).mean(),
-            "benchmark_avg_return": df["benchmark_total_return"].mean(),
-            "benchmark_avg_sharpe": df["benchmark_sharpe_ratio"].mean(),
-            "excess_return": df["total_return"].mean()
-            - df["benchmark_total_return"].mean(),
-            "excess_sharpe": df["sharpe_ratio"].mean()
-            - df["benchmark_sharpe_ratio"].mean(),
+            # 60/40 benchmark metrics
+            "benchmark_6040_avg_return": df["benchmark_6040_total_return"].mean(),
+            "benchmark_6040_avg_sharpe": df["benchmark_6040_sharpe_ratio"].mean(),
+            "excess_return_vs_6040": df["total_return"].mean()
+            - df["benchmark_6040_total_return"].mean(),
+            "excess_sharpe_vs_6040": avg_period_sharpe
+            - df["benchmark_6040_sharpe_ratio"].mean(),
+            # SPY benchmark metrics
+            "benchmark_spy_avg_return": df["benchmark_spy_total_return"].mean(),
+            "benchmark_spy_avg_sharpe": df["benchmark_spy_sharpe_ratio"].mean(),
+            "excess_return_vs_spy": df["total_return"].mean()
+            - df["benchmark_spy_total_return"].mean(),
+            "excess_sharpe_vs_spy": avg_period_sharpe
+            - df["benchmark_spy_sharpe_ratio"].mean(),
+            # TLT benchmark metrics
+            "benchmark_tlt_avg_return": df["benchmark_tlt_total_return"].mean(),
+            "benchmark_tlt_avg_sharpe": df["benchmark_tlt_sharpe_ratio"].mean(),
+            "excess_return_vs_tlt": df["total_return"].mean()
+            - df["benchmark_tlt_total_return"].mean(),
+            "excess_sharpe_vs_tlt": avg_period_sharpe
+            - df["benchmark_tlt_sharpe_ratio"].mean(),
             # Add transaction cost metrics
             "total_transaction_costs": df["transaction_cost"].sum(),
             "avg_transaction_cost": df["transaction_cost"].mean(),
             "total_turnover": df["turnover"].sum(),
             "avg_turnover": df["turnover"].mean(),
             "net_total_return": df["net_total_return"].mean(),
+            # Annualized aggregate metrics (for final display)
+            "avg_return_annual": avg_annual_return,
+            "avg_volatility_annual": avg_annual_volatility,
+            "avg_sharpe_ratio_annual": avg_annual_sharpe,
+            "avg_sortino_ratio_annual": df["sortino_ratio_annual"].abs().mean(),
+            "avg_calmar_ratio_annual": (
+                df["total_return"].mean() * periods / abs(df["max_drawdown"].min())
+                if df["max_drawdown"].min() != 0
+                else 0.0
+            ),
         }
 
         # Calculate aggregate Sortino ratio properly
@@ -572,12 +808,12 @@ class WalkForwardBacktester:
                 downside_returns = all_returns_array[all_returns_array < 0]
 
                 if len(downside_returns) > 0:
-                    downside_deviation = np.std(downside_returns)
+                    downside_deviation = abs(np.std(downside_returns))
                     if downside_deviation > 0:
-                        # Use annualized risk-free rate
-                        risk_free_rate_monthly = self.risk_free_rate / 12
+                        # FIXED: Use correct risk-free rate periodicity
+                        rf_period = self.risk_free_rate / self.periods_per_year
                         aggregate_sortino = (
-                            avg_return - risk_free_rate_monthly
+                            avg_return - rf_period
                         ) / downside_deviation
                     else:
                         aggregate_sortino = 0.0
@@ -592,14 +828,132 @@ class WalkForwardBacktester:
 
         aggregate_metrics["avg_sortino_ratio"] = aggregate_sortino
 
+        # Calculate max drawdown across entire backtest period
+        try:
+            # Get all portfolio returns across all periods and build cumulative equity curve
+            all_returns = []
+            for period_data in self.performance_history:
+                period_returns = period_data.get("period_returns", [])
+                if period_returns:
+                    all_returns.extend(period_returns)
+
+            if all_returns:
+                # Build cumulative equity curve
+                cumulative_returns = np.array(all_returns)
+                equity_curve = (1 + cumulative_returns).cumprod()
+
+                # Calculate max drawdown across entire backtest
+                running_max = np.maximum.accumulate(equity_curve)
+                drawdown = (equity_curve - running_max) / running_max
+                max_drawdown_overall = drawdown.min()
+
+                # Calculate Calmar ratio using overall max drawdown
+                total_return_overall = equity_curve[-1] - 1
+                calmar_ratio_overall = (
+                    total_return_overall / abs(max_drawdown_overall)
+                    if max_drawdown_overall != 0
+                    else 0.0
+                )
+
+                aggregate_metrics["max_drawdown_overall"] = max_drawdown_overall
+                aggregate_metrics["calmar_ratio_overall"] = calmar_ratio_overall
+            else:
+                aggregate_metrics["max_drawdown_overall"] = 0.0
+                aggregate_metrics["calmar_ratio_overall"] = 0.0
+
+        except Exception as e:
+            logger.warning(f"Error calculating overall max drawdown: {e}")
+            aggregate_metrics["max_drawdown_overall"] = 0.0
+            aggregate_metrics["calmar_ratio_overall"] = 0.0
+
         return aggregate_metrics
+
+    def _infer_data_frequency(self, returns_df: pd.DataFrame) -> None:
+        """Infer data frequency from the index and set periods_per_year."""
+        try:
+            # Get the frequency of the index
+            freq = pd.infer_freq(returns_df.index)
+
+            if freq is None:
+                # Try to infer from the average time difference
+                time_diffs = returns_df.index.to_series().diff().dropna()
+                avg_days = time_diffs.dt.days.mean()
+
+                if avg_days <= 1:
+                    self.data_frequency = "daily"
+                    self.periods_per_year = 252
+                elif avg_days <= 7:
+                    self.data_frequency = "weekly"
+                    self.periods_per_year = 52
+                elif avg_days <= 35:
+                    self.data_frequency = "monthly"
+                    self.periods_per_year = 12
+                elif avg_days <= 100:
+                    self.data_frequency = "quarterly"
+                    self.periods_per_year = 4
+                else:
+                    self.data_frequency = "annual"
+                    self.periods_per_year = 1
+            else:
+                # Use pandas frequency inference
+                if freq.startswith("D"):
+                    self.data_frequency = "daily"
+                    self.periods_per_year = 252
+                elif freq.startswith("W"):
+                    self.data_frequency = "weekly"
+                    self.periods_per_year = 52
+                elif freq.startswith("M"):
+                    self.data_frequency = "monthly"
+                    self.periods_per_year = 12
+                elif freq.startswith("Q"):
+                    self.data_frequency = "quarterly"
+                    self.periods_per_year = 4
+                elif freq.startswith("A") or freq.startswith("Y"):
+                    self.data_frequency = "annual"
+                    self.periods_per_year = 1
+                else:
+                    # Default to monthly if unclear
+                    self.data_frequency = "monthly"
+                    self.periods_per_year = 12
+
+            logger.info(
+                f"Inferred data frequency: {self.data_frequency} ({self.periods_per_year} periods per year)"
+            )
+
+        except Exception as e:
+            logger.warning(
+                f"Error inferring data frequency: {e}. Defaulting to monthly."
+            )
+            self.data_frequency = "monthly"
+            self.periods_per_year = 12
 
     def _get_transaction_cost(self, asset: str) -> float:
         """Return transaction cost (as a decimal) for a given asset based on type."""
+        # FIXED: Use user-provided transaction costs instead of hard-coded values
+        # Try to find exact asset match first
+        if asset in self.transaction_costs:
+            return self.transaction_costs[asset]
+
+        # Try to match by asset type
+        asset_type = self._get_asset_type(asset)
+        if asset_type in self.transaction_costs:
+            return self.transaction_costs[asset_type]
+
+        # Default fallback
+        return self.transaction_costs.get("default", 0.002)
+
+    def _get_asset_type(self, asset: str) -> str:
+        """Determine asset type for transaction cost lookup."""
         # Default mapping (can be extended)
         if asset in ["SPY", "TLT", "GLD", "EFA", "IWM", "XLE"]:
-            return 0.0005  # ETF
+            return "ETFs"
         elif asset in ["AAPL", "MSFT", "JPM", "UNH", "WMT", "BA"]:
-            return 0.001  # Large Cap
+            return "Large_Cap"
+        elif "IWM" in asset or "small" in asset.lower():
+            return "Small_Cap"
+        elif "EFA" in asset or "international" in asset.lower():
+            return "International"
+        elif "XLE" in asset or "commodity" in asset.lower():
+            return "Commodities"
         else:
-            return 0.002  # Default for others
+            return "default"

@@ -1,10 +1,8 @@
 Portfolio Optimization Summary
 ==================================================
-Method: black_litterman
-Expected Return: 0.064
-Volatility: 0.101
-Sharpe Ratio: 0.184
-Max Drawdown: -0.152
-VaR (95%): -0.036
+Method: combined
+Expected Return: 0.207
+Volatility: 0.192
+Sharpe Ratio: 0.840
 
-Constraints: {'max_weight': 0.2, 'min_weight': 0.03}
+Constraints: {'max_weight': 0.3, 'min_weight': 0.01}

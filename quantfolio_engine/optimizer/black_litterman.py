@@ -18,12 +18,23 @@ import pandas as pd
 from quantfolio_engine.config import ASSET_UNIVERSE
 
 
+def set_log_level(debug: bool):
+    from loguru import logger
+
+    logger.remove()
+    logger.add(
+        lambda msg: print(msg, end=""),
+        level="DEBUG" if debug else "INFO",
+        colorize=True,
+    )
+
+
 class BlackLittermanOptimizer:
     """
     Black-Litterman portfolio optimization model.
 
-    Combines market equilibrium with investor views and quantitative signals
-    to generate optimal portfolio weights.
+    Args:
+        debug (bool): If True, sets logger to DEBUG level for verbose output. Default is False.
     """
 
     def __init__(
@@ -33,7 +44,9 @@ class BlackLittermanOptimizer:
         tau: float = 0.05,
         lambda_mkt: float = 0.25,  # Market risk aversion parameter (scaled for monthly Σ)
         time_basis: str = "monthly",  # Time basis for all calculations
+        debug: bool = False,
     ):
+        set_log_level(debug)
         """
         Initialize Black-Litterman optimizer.
 
@@ -130,6 +143,7 @@ class BlackLittermanOptimizer:
         cov_matrix: pd.DataFrame,
         market_cap_weight: Optional[Dict[str, float]] = None,
         grand_view_gamma: float = 0.0,
+        sentiment_scores: Optional[pd.DataFrame] = None,
     ) -> pd.Series:
         """
         Calculate equilibrium returns using reverse optimization.
@@ -163,6 +177,32 @@ class BlackLittermanOptimizer:
             pi_blended = (1 - grand_view_gamma) * pi + grand_view_gamma * grand_mean
             pi = pi_blended
             logger.info(f"Applied grand view blend (γ={grand_view_gamma:.2f})")
+
+        # Apply sentiment adjustment if sentiment_scores provided
+        if sentiment_scores is not None and not sentiment_scores.empty:
+            logger.info("Applying sentiment adjustment to equilibrium returns...")
+            # Get latest sentiment scores
+            latest_sentiment = (
+                sentiment_scores.iloc[-1] if len(sentiment_scores) > 0 else pd.Series()
+            )
+
+            if not latest_sentiment.empty:
+                # Align sentiment with assets
+                sentiment_aligned = latest_sentiment.reindex(
+                    cov_matrix.columns, fill_value=0.0
+                )
+
+                # Scale sentiment impact (sentiment ranges from -1 to 1)
+                sentiment_impact = 0.02  # 2% maximum sentiment adjustment
+                sentiment_adjustment = sentiment_aligned * sentiment_impact
+
+                # Apply sentiment adjustment to equilibrium returns
+                pi = pi + sentiment_adjustment.values
+                logger.info(
+                    f"Applied sentiment adjustment: mean adjustment = {sentiment_adjustment.mean():.4f}"
+                )
+            else:
+                logger.warning("No valid sentiment scores available for adjustment")
 
         equilibrium_returns = pd.Series(pi, index=cov_matrix.columns)
 
@@ -431,24 +471,28 @@ class BlackLittermanOptimizer:
             latest_exposures = factor_exposures[factor_exposures["date"] == latest_date]
 
             # Pivot to get asset exposures for the latest date
-            exposures_wide = latest_exposures.pivot(
-                index="date", columns="asset", values="UNRATE"  # Use any factor column
-            )
+            # Use the first available factor column instead of hard-coded "UNRATE"
+            factor_columns = [
+                col for col in factor_exposures.columns if col not in ["date", "asset"]
+            ]
+            if factor_columns:
+                pivot_factor = factor_columns[0]  # Use first available factor
+                logger.debug(f"Using factor '{pivot_factor}' for pivot")
+                # exposures_wide = latest_exposures.pivot(
+                #     index="date", columns="asset", values=pivot_factor
+                # )
+            else:
+                logger.warning("No factor columns found for pivot")
+                # exposures_wide = pd.DataFrame()
 
             # Get all factor columns except date and asset
             factor_columns = [
                 col for col in factor_exposures.columns if col not in ["date", "asset"]
             ]
 
-            # Create a combined exposure for view formation
-            latest_exposures_combined = {}
-            for asset in exposures_wide.columns:
-                asset_data = latest_exposures[latest_exposures["asset"] == asset]
-                if not asset_data.empty:
-                    # Use the first factor as representative (or average across factors)
-                    latest_exposures_combined[asset] = asset_data.iloc[0]
-
-            latest_exposures = pd.Series(latest_exposures_combined)
+            # Create views based on factor exposures for the latest date
+            latest_date = factor_exposures["date"].max()
+            latest_data = factor_exposures[factor_exposures["date"] == latest_date]
 
         else:
             # Handle wide format or MultiIndex format (legacy)
@@ -569,8 +613,14 @@ class BlackLittermanOptimizer:
                                     avg_exposure = abs(factor_exposures_series.mean())
 
                                     # IC-based scaling: higher IC = stronger views
+                                    # Scale by factor volatility and IC strength
+                                    factor_vol = (
+                                        factor_exposures_series.std()
+                                        if len(factor_exposures_series) > 1
+                                        else 0.01
+                                    )
                                     base_return = (
-                                        0.01 * abs(ic_value) * regime_multiplier
+                                        abs(ic_value) * factor_vol * regime_multiplier
                                     )
                                     scaled_return = base_return * max(
                                         avg_exposure, 0.01
@@ -579,10 +629,12 @@ class BlackLittermanOptimizer:
                                     view_returns.append(
                                         adjusted_view_strength * scaled_return
                                     )
-                                    view_uncertainties.append(
-                                        0.5
-                                        * abs(adjusted_view_strength * scaled_return)
+                                    # Convert to variance (squared return) for Omega
+                                    view_std = 0.5 * abs(
+                                        adjusted_view_strength * scaled_return
                                     )
+                                    view_var = view_std**2  # variance, NOT level return
+                                    view_uncertainties.append(view_var)
 
         else:
             # Original wide format logic (legacy)
@@ -623,16 +675,26 @@ class BlackLittermanOptimizer:
                                 avg_exposure = abs(cpi_exposures.mean())
 
                                 # IC-based scaling: higher IC = stronger views
-                                # Base monthly return: 1% with IC adjustment
-                                base_return = 0.01 * abs(ic_value) * regime_multiplier
+                                # Scale by factor volatility and IC strength
+                                factor_vol = (
+                                    cpi_exposures.std()
+                                    if len(cpi_exposures) > 1
+                                    else 0.01
+                                )
+                                base_return = (
+                                    abs(ic_value) * factor_vol * regime_multiplier
+                                )
                                 scaled_return = base_return * max(avg_exposure, 0.01)
 
                                 view_returns.append(
                                     adjusted_view_strength * scaled_return
                                 )
-                                view_uncertainties.append(
-                                    0.5 * abs(adjusted_view_strength * scaled_return)
+                                # Convert to variance (squared return) for Omega
+                                view_std = 0.5 * abs(
+                                    adjusted_view_strength * scaled_return
                                 )
+                                view_var = view_std**2  # variance, NOT level return
+                                view_uncertainties.append(view_var)
 
         if not views:
             logger.warning("No factor timing views created")
@@ -679,7 +741,9 @@ class BlackLittermanOptimizer:
 
         # Calculate equilibrium returns
         pi = self.calculate_equilibrium_returns(
-            cov_matrix, grand_view_gamma=self.grand_view_gamma
+            cov_matrix,
+            grand_view_gamma=self.grand_view_gamma,
+            sentiment_scores=sentiment_scores,
         )
 
         # Create views if factor data is available
@@ -718,11 +782,13 @@ class BlackLittermanOptimizer:
             M_inv = np.linalg.inv(M)
             sigma_bl = cov_matrix.values + M_inv
 
-            # Ensure minimum variance floor to prevent numerical issues
-            min_variance = 1e-6
-            for i in range(sigma_bl.shape[0]):
-                if sigma_bl[i, i] < min_variance:
-                    sigma_bl[i, i] = min_variance
+            # Condition the matrix before inversion to prevent numerical issues
+            # Add small regularization to diagonal: Σ̂ = Σ + ε·I with ε = 1e-8 * trace(Σ)/n
+            trace_sigma = np.trace(sigma_bl)
+            n_assets = sigma_bl.shape[0]
+            epsilon = 1e-8 * trace_sigma / n_assets
+            sigma_bl = sigma_bl + epsilon * np.eye(n_assets)
+            logger.debug(f"Added regularization ε = {epsilon:.2e} to covariance matrix")
 
         else:
             # No views - use equilibrium returns with prior covariance
@@ -737,6 +803,22 @@ class BlackLittermanOptimizer:
         sigma_bl_df = pd.DataFrame(
             sigma_bl, index=cov_matrix.columns, columns=cov_matrix.columns
         )
+
+        # Sanity checks for Black-Litterman results
+        if len(P) > 0:
+            # Check posterior vs prior differences
+            delta = (mu_bl_series - pi).abs()
+            if delta.median() > 3 * pi.std():
+                logger.warning("Views may be overpowering prior - check Ω scaling")
+                logger.debug(f"Median posterior-prior difference: {delta.median():.4f}")
+                logger.debug(f"Prior std: {pi.std():.4f}")
+
+            # Check for reasonable return ranges
+            if mu_bl_series.abs().max() > 0.5:  # 50% monthly return is unrealistic
+                logger.warning(
+                    "Unrealistic posterior returns detected - check view scaling"
+                )
+                logger.debug(f"Max absolute return: {mu_bl_series.abs().max():.4f}")
 
         # Optimize weights with constraints
         optimal_weights = self._optimize_weights(
@@ -854,11 +936,16 @@ class BlackLittermanOptimizer:
 
         # Add maximum volatility constraint
         if max_volatility is not None:
-            # Convert annual max_volatility to monthly for consistency with covariance matrix
-            monthly_max_vol = max_volatility / np.sqrt(12)
-            constraints_list.append(
-                cp.quad_form(w, covariance_matrix.values) <= monthly_max_vol**2
+            # Note: Removed hard volatility constraint to avoid conflicting with λ penalty
+            # The λ term in the objective already penalizes variance appropriately
+            logger.warning(
+                "max_volatility constraint ignored - use λ tuning instead for vol targeting"
             )
+            # Uncomment below if you want to enforce hard volatility constraint:
+            # monthly_max_vol = max_volatility / np.sqrt(12)
+            # constraints_list.append(
+            #     cp.quad_form(w, covariance_matrix.values) <= monthly_max_vol**2
+            # )
 
         # Add custom constraints
         if constraints:
@@ -900,7 +987,7 @@ class BlackLittermanOptimizer:
         self,
         returns_df: pd.DataFrame,
         target_sharpe: Optional[float] = None,
-        lambda_range: tuple = (0.5, 0.75),
+        lambda_range: tuple = (0.15, 0.40),  # Realistic monthly λ range (annual 2-4)
         n_points: int = 10,
     ) -> float:
         """
@@ -949,13 +1036,17 @@ class BlackLittermanOptimizer:
         equilibrium_sharpes = []
 
         for lam in lambda_values:
-            # Calculate equilibrium returns
+            # Calculate equilibrium returns (monthly)
             pi = lam * sigma @ w_mkt
 
-            # Calculate equilibrium portfolio Sharpe
-            eq_return = (pi * w_mkt).sum() * 12  # Annualized
-            eq_vol = np.sqrt(w_mkt @ sigma @ w_mkt) * np.sqrt(12)  # Annualized
-            eq_sharpe = (eq_return - self.risk_free_rate) / eq_vol
+            # Calculate equilibrium portfolio Sharpe (keep everything in monthly units for consistency)
+            eq_return_monthly = (pi * w_mkt).sum()
+            eq_vol_monthly = np.sqrt(w_mkt @ sigma @ w_mkt)
+
+            # Convert to annual for Sharpe calculation
+            eq_return_annual = eq_return_monthly * 12
+            eq_vol_annual = eq_vol_monthly * np.sqrt(12)
+            eq_sharpe = (eq_return_annual - self.risk_free_rate) / eq_vol_annual
             equilibrium_sharpes.append(eq_sharpe)
 
         # Find λ that gives closest Sharpe to target

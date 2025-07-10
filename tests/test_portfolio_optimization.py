@@ -490,8 +490,9 @@ class TestPortfolioOptimizationEngine:
         assert "expected_return" in risk_metrics
         assert "sharpe_ratio" in risk_metrics
         assert "max_drawdown" in risk_metrics
-        assert "var_95" in risk_metrics
-        assert "cvar_95" in risk_metrics
+        assert "var_95_month" in risk_metrics
+        assert "cvar_95_month" in risk_metrics
+        assert "beta" in risk_metrics
 
     def test_invalid_method(self):
         """Test handling of invalid optimization method."""

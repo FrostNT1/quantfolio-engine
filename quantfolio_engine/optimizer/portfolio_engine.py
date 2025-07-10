@@ -17,12 +17,26 @@ from quantfolio_engine.optimizer.black_litterman import BlackLittermanOptimizer
 from quantfolio_engine.optimizer.monte_carlo import MonteCarloOptimizer
 
 
+def set_log_level(debug: bool):
+    from loguru import logger
+
+    logger.remove()
+    logger.add(
+        lambda msg: print(msg, end=""),
+        level="DEBUG" if debug else "INFO",
+        colorize=True,
+    )
+
+
 class PortfolioOptimizationEngine:
     """
     Main portfolio optimization engine.
 
     Combines Black-Litterman and Monte Carlo approaches for robust
     portfolio optimization with factor timing integration.
+
+    Args:
+        debug (bool): If True, sets logger to DEBUG level for verbose output. Default is False.
     """
 
     def __init__(
@@ -32,6 +46,7 @@ class PortfolioOptimizationEngine:
         max_drawdown: float = 0.15,
         confidence_level: float = 0.95,
         random_state: Optional[int] = None,
+        debug: bool = False,
     ):
         """
         Initialize portfolio optimization engine.
@@ -43,6 +58,7 @@ class PortfolioOptimizationEngine:
             confidence_level: Confidence level for risk metrics
             random_state: Random seed for reproducibility
         """
+        set_log_level(debug)
         self.method = method
         self.risk_free_rate = risk_free_rate
         self.max_drawdown = max_drawdown
@@ -252,7 +268,7 @@ class PortfolioOptimizationEngine:
         if self.bl_lambda == "auto":
             # Import config for calibration parameters
 
-            from ..config import DEFAULT_BL_CONFIG
+            from quantfolio_engine.config import DEFAULT_BL_CONFIG
 
             # Parse λ range from CLI or use config default
             if self.bl_lambda_range:
@@ -377,8 +393,11 @@ class PortfolioOptimizationEngine:
 
         # Calculate correlation between strategies using historical data
         returns_df = data["returns"]
-        bl_portfolio_returns = (returns_df * bl_weights).sum(axis=1)
-        mc_portfolio_returns = (returns_df * mc_weights).sum(axis=1)
+
+        bl_weights_series = pd.Series(bl_weights, index=returns_df.columns)
+        mc_weights_series = pd.Series(mc_weights, index=returns_df.columns)
+        bl_portfolio_returns = (returns_df * bl_weights_series).sum(axis=1)
+        mc_portfolio_returns = (returns_df * mc_weights_series).sum(axis=1)
 
         # Calculate correlation between strategies
         correlation = np.corrcoef(bl_portfolio_returns, mc_portfolio_returns)[0, 1]
@@ -390,7 +409,6 @@ class PortfolioOptimizationEngine:
 
         # Strategy returns and volatilities
         strategy_returns = np.array([bl_return, mc_return])
-        # strategy_vols = np.array([bl_vol, mc_vol])  # Not used in current implementation
 
         # Create covariance matrix for strategies
         strategy_cov = np.array(
@@ -403,9 +421,12 @@ class PortfolioOptimizationEngine:
         # Optimize allocation between strategies
         w_strategies = cp.Variable(2)
 
-        # Objective: maximize Sharpe ratio
+        # FIXED: Use proper risk-adjusted return objective instead of just excess return
+        # Objective: maximize Sharpe ratio using quadratic utility
+        risk_aversion = 3.07  # Reasonable risk aversion parameter
         objective = cp.Maximize(
-            cp.sum(cp.multiply(strategy_returns, w_strategies)) - self.risk_free_rate
+            cp.sum(cp.multiply(strategy_returns - self.risk_free_rate, w_strategies))
+            - 0.5 * risk_aversion * cp.quad_form(w_strategies, strategy_cov)
         )
 
         # Constraints
@@ -445,6 +466,11 @@ class PortfolioOptimizationEngine:
             strategy_weights[0] * bl_weights + strategy_weights[1] * mc_weights
         )
 
+        # FIXED: Convert combined weights to Series with proper index
+        combined_weights_series = pd.Series(
+            combined_weights, index=returns_df.columns, name="weight"
+        )
+
         # Calculate combined metrics
         combined_return = (
             strategy_weights[0] * bl_return + strategy_weights[1] * mc_return
@@ -467,7 +493,7 @@ class PortfolioOptimizationEngine:
 
         result = {
             "method": "combined",
-            "weights": combined_weights,
+            "weights": combined_weights_series,
             "expected_return": combined_return,
             "volatility": combined_vol,
             "sharpe_ratio": combined_sharpe,
@@ -603,8 +629,10 @@ class PortfolioOptimizationEngine:
         max_drawdown = drawdowns.min()
 
         # Calculate VaR and CVaR
-        var_95 = portfolio_returns.quantile(0.05)
-        cvar_95 = portfolio_returns[portfolio_returns <= var_95].mean()
+        var_95_month = portfolio_returns.quantile(0.05)  # Monthly VaR
+        cvar_95_month = portfolio_returns[
+            portfolio_returns <= var_95_month
+        ].mean()  # Monthly CVaR
 
         # Calculate beta (if market data available)
         if "SPY" in returns_df.columns:
@@ -621,8 +649,8 @@ class PortfolioOptimizationEngine:
             "expected_return": expected_return,
             "sharpe_ratio": sharpe_ratio,
             "max_drawdown": max_drawdown,
-            "var_95": var_95,
-            "cvar_95": cvar_95,
+            "var_95_month": var_95_month,  # Monthly VaR
+            "cvar_95_month": cvar_95_month,  # Monthly CVaR
             "beta": beta,
         }
 
@@ -666,7 +694,9 @@ class PortfolioOptimizationEngine:
 
         if "max_drawdown" in results:
             metrics["max_drawdown"] = results["max_drawdown"]
-        if "var_95" in results:
+        if "var_95_month" in results:
+            metrics["var_95_month"] = results["var_95_month"]
+        elif "var_95" in results:  # Backward compatibility
             metrics["var_95"] = results["var_95"]
 
         metrics_df = pd.DataFrame([metrics])

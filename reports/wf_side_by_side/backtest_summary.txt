@@ -1,0 +1,31 @@
+Walk-Forward Backtest Summary
+==================================================
+Method: combined
+Train years: 3
+Test years: 1
+Rebalance frequency: monthly
+Total periods: 86
+
+PERFORMANCE METRICS:
+==================================================
+Average cumulative return: 0.012 (per test period)
+Average return: 0.000 (annualized)
+Average volatility: 0.000 (per test period) | 0.000 (annualized)
+Average Sharpe ratio: 0.000 (per test period) | 0.000 (annualized)
+Average Sortino ratio: 0.387 (per test period) | 0.000 (annualized)
+Average Calmar ratio: 0.000 (per test period)
+Worst max drawdown: 0.000 (cumulative)
+Hit ratio: 0.605 (success rate)
+
+BENCHMARK COMPARISON:
+==================================================
+Excess return vs benchmark: 0.006 (per test period)
+Excess Sharpe vs benchmark: 0.000 (per test period)
+
+TRANSACTION COSTS & TURNOVER:
+==================================================
+Total transaction costs: 0.0050 (cumulative)
+Average transaction cost: 0.0001 (per test period)
+Total portfolio turnover: 6.472 (cumulative)
+Average turnover: 0.075 (per test period)
+Net total return: 0.012 (per test period)

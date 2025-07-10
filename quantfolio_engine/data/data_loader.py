@@ -77,8 +77,24 @@ class RandomSentimentProvider:
         return sentiment_scores
 
 
+def set_log_level(debug: bool):
+    from loguru import logger
+
+    logger.remove()
+    logger.add(
+        lambda msg: print(msg, end=""),
+        level="DEBUG" if debug else "INFO",
+        colorize=True,
+    )
+
+
 class DataLoader:
-    """Data loader for fetching and processing financial data."""
+    """
+    Data loader for fetching and processing financial data.
+
+    Args:
+        debug (bool): If True, sets logger to DEBUG level for verbose output. Default is False.
+    """
 
     def __init__(
         self,
@@ -86,16 +102,9 @@ class DataLoader:
         yf_client=None,
         fred_client=None,
         sentiment_client: Optional[BaseSentimentProvider] = None,
+        debug: bool = False,
     ):
-        """
-        Initialize the data loader with optional dependency injection.
-
-        Args:
-            config: Data configuration
-            yf_client: Yahoo Finance client (defaults to yfinance)
-            fred_client: FRED API client (defaults to Fred)
-            sentiment_client: Sentiment provider (defaults to RandomSentimentProvider)
-        """
+        set_log_level(debug)
         self.config = config or get_default_data_config()
         self.yf_client = yf_client or yf
         self.fred_client = fred_client or Fred(api_key=self.config.fred_api_key)
@@ -176,18 +185,19 @@ class DataLoader:
                         if save_raw:
                             raw_data_dict[ticker_name] = ticker_data
 
-                except Exception as e:
-                    logger.error(f"Error processing data for {ticker}: {e}")
+                except Exception:
+                    logger.exception(f"Error processing data for {ticker}")
                     continue
 
             # Batch save raw data
             if save_raw and raw_data_dict:
                 self._batch_save_raw_data(raw_data_dict, "prices")
 
-        except Exception as e:
+        except Exception:
             logger.warning(
-                f"Batch download failed: {e}, falling back to individual downloads..."
+                "Batch download failed, falling back to individual downloads..."
             )
+            logger.exception("Batch download error details")
             # Fallback to individual downloads
             all_data = self._fetch_asset_returns_individual(
                 start_date, end_date, save_raw
@@ -231,8 +241,8 @@ class DataLoader:
                         all_data[ticker] = result["returns"]
                         if save_raw and result["raw_data"] is not None:
                             raw_data_dict[ticker] = result["raw_data"]
-                except Exception as e:
-                    logger.error(f"Error fetching data for {ticker}: {e}")
+                except Exception:
+                    logger.exception(f"Error fetching data for {ticker}")
                     continue
 
         # Batch save raw data
@@ -265,8 +275,8 @@ class DataLoader:
 
                 return {"returns": returns, "raw_data": ticker_data}
 
-        except Exception as e:
-            logger.error(f"Error fetching data for {ticker}: {e}")
+        except Exception:
+            logger.exception(f"Error fetching data for {ticker}")
             return None
         return None
 
@@ -294,8 +304,8 @@ class DataLoader:
                     data.to_parquet(parquet_file)
 
                 logger.debug(f"Saved raw data to {parquet_file}")
-            except Exception as e:
-                logger.error(f"Error saving raw data for {name}: {e}")
+            except Exception:
+                logger.exception(f"Error saving raw data for {name}")
 
     def fetch_macro_indicators(
         self,
@@ -354,8 +364,8 @@ class DataLoader:
                         all_data[series_id] = result["monthly_data"]
                         if save_raw and result["raw_data"] is not None:
                             raw_data_dict[series_id] = result["raw_data"]
-                except Exception as e:
-                    logger.error(f"Error fetching {series_id}: {e}")
+                except Exception:
+                    logger.exception(f"Error fetching {series_id}")
                     continue
 
         # Handle VIX separately (from Yahoo Finance)
@@ -367,12 +377,12 @@ class DataLoader:
                 # Strip timezone consistently
                 vix_data = strip_timezone(vix_data)
                 monthly_vix = vix_data["Close"].resample("ME").mean()
-                all_data["^VIX"] = monthly_vix
+                all_data["VIX"] = monthly_vix
 
                 if save_raw:
-                    raw_data_dict["^VIX"] = vix_data
-        except Exception as e:
-            logger.error(f"Error fetching VIX: {e}")
+                    raw_data_dict["VIX"] = vix_data
+        except Exception:
+            logger.exception("Error fetching VIX from Yahoo Finance")
 
         # Batch save raw data
         if save_raw and raw_data_dict:

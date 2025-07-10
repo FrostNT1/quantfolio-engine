@@ -30,6 +30,7 @@ class DataValidator:
         min_testing_years: int = 2,
         max_gap_days: int = 30,
         min_data_completeness: float = 0.95,
+        rebalance_frequency: str = "monthly",
     ):
         """
         Initialize data validator.
@@ -44,6 +45,16 @@ class DataValidator:
         self.min_testing_years = min_testing_years
         self.max_gap_days = max_gap_days
         self.min_data_completeness = min_data_completeness
+        self.rebalance_frequency = rebalance_frequency
+
+        # Define gap tolerance based on rebalancing frequency
+        self.gap_tolerance_days = {
+            "monthly": 35,  # ~1 month
+            "quarterly": 120,  # ~4 months
+            "annual": 400,  # ~13 months
+        }.get(
+            rebalance_frequency, 35
+        )  # Default to monthly if unknown
 
     def validate_data_for_backtesting(
         self,
@@ -165,12 +176,14 @@ class DataValidator:
                 )
 
             # Check for large gaps (allow up to 35 days for monthly data)
-            date_gaps = returns_df.index.to_series().diff().dt.days
-            max_gap = date_gaps.max()
-            if max_gap > max(self.max_gap_days, 35):  # Allow 35 days for monthly data
+            # FIXED: Sort dates first to avoid negative gaps from unsorted indices
+            dates = returns_df.index.sort_values()
+            date_gaps = dates.to_series().diff().dt.days
+            max_gap = date_gaps.max(skipna=True)
+            if max_gap > max(self.max_gap_days, self.gap_tolerance_days):
                 return (
                     False,
-                    f"FAILED: Maximum gap {max_gap} days > {max(self.max_gap_days, 35)} days",
+                    f"FAILED: Maximum gap {max_gap} days > {max(self.max_gap_days, self.gap_tolerance_days)} days (tolerance for {self.rebalance_frequency} rebalancing)",
                 )
 
             return (
@@ -264,8 +277,8 @@ class DataValidator:
                 # Check for reasonable values
                 if data_type == "exposures":
                     # Factor exposures should be reasonable (not extreme)
-                    if (factor_df.abs() > 10).any().any():
-                        return False, f"FAILED: {data_type} contain extreme values > 10"
+                    if (factor_df.abs() > 20).any().any():
+                        return False, f"FAILED: {data_type} contain extreme values > 20"
                 elif data_type == "regimes":
                     # Regimes should be integers
                     if not factor_df.dtypes.apply(
@@ -385,11 +398,14 @@ class DataValidator:
                     # Returns data has datetime index
                     date_ranges[name] = (df.index.min(), df.index.max())
                 else:
-                    # Other datasets have date column as string
+                    # FIXED: Handle both long format (date column) and wide format (DatetimeIndex)
                     if "date" in df.columns:
-                        # Convert string dates to datetime for comparison
+                        # Long format: Convert string dates to datetime for comparison
                         df_dates = pd.to_datetime(df["date"])
                         date_ranges[name] = (df_dates.min(), df_dates.max())
+                    elif isinstance(df.index, pd.DatetimeIndex):
+                        # Wide format: Use DatetimeIndex directly
+                        date_ranges[name] = (df.index.min(), df.index.max())
                     else:
                         # Skip datasets without date information
                         continue

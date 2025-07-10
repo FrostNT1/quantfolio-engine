@@ -11,7 +11,6 @@ load_dotenv()
 
 # Paths
 PROJ_ROOT = Path(__file__).resolve().parents[1]
-logger.info(f"PROJ_ROOT path is: {PROJ_ROOT}")
 
 DATA_DIR = PROJ_ROOT / "data"
 RAW_DATA_DIR = DATA_DIR / "raw"
@@ -67,7 +66,7 @@ SENTIMENT_TOPICS = [
 
 # Data frequency and date ranges
 DATA_FREQUENCY = "M"  # Monthly
-DEFAULT_START_DATE = "2015-01-01"
+DEFAULT_START_DATE = "2010-01-01"
 DEFAULT_END_DATE = None  # Will use current date
 
 # API Configuration

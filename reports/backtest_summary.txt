@@ -1,21 +1,40 @@
 Walk-Forward Backtest Summary
 ==================================================
 Method: combined
-Train years: 8
-Test years: 2
-Rebalance frequency: monthly
-Total periods: 90
-Average total return: 0.019
-Average Sharpe ratio: 0.850
-Average Sortino ratio: 0.349
-Average Calmar ratio: 3.521
-Worst max drawdown: -0.086
-Average volatility: 0.039
-Hit ratio: 0.600
-Excess return vs benchmark: 0.008
-Excess Sharpe vs benchmark: 0.598
-Total transaction costs: 0.0035
-Average transaction cost per period: 0.0000
-Total portfolio turnover: 3.514
-Average turnover per period: 0.039
-Net total return (after costs): 0.019
+Train years: 12
+Test years: 7
+Rebalance frequency: quarterly
+Total periods: 50
+
+PERFORMANCE METRICS:
+==================================================
+Average per-period cumulative return: 0.034
+Annualized average return: 0.160
+Average per-period volatility: 0.022 | Annualized: 0.077
+Average per-period Sharpe ratio: 1.480 | Annualized: 5.127
+Average per-period Sortino ratio: 0.418 | Annualized: 2.913
+Average per-period Calmar ratio: 1.561 | Annualized: 3.214
+Worst max drawdown: -0.126 (per test period)
+Overall max drawdown: -0.207 (entire backtest)
+Overall Calmar ratio: 18.655 (entire backtest)
+Hit ratio: 0.760 (success rate)
+
+BENCHMARK COMPARISON:
+==================================================
+60/40 SPY/TLT Benchmark:
+  Excess return: 0.013 (per test period)
+  Excess Sharpe: 0.316 (per test period)
+SPY (Equity) Benchmark:
+  Excess return: -0.000 (per test period)
+  Excess Sharpe: 0.435 (per test period)
+TLT (Treasury) Benchmark:
+  Excess return: 0.031 (per test period)
+  Excess Sharpe: 0.762 (per test period)
+
+TRANSACTION COSTS & TURNOVER:
+==================================================
+Total transaction costs: 0.0034 (cumulative)
+Average transaction cost: 0.0001 (per test period)
+Total portfolio turnover: 4.807 (cumulative)
+Average turnover: 0.096 (per test period)
+Net total return: 0.034 (per test period)

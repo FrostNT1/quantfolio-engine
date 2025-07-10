@@ -566,12 +566,23 @@ class RegimeDetector:
         return regime_df
 
 
+def set_log_level(debug: bool):
+    from loguru import logger
+
+    logger.remove()
+    logger.add(
+        lambda msg: print(msg, end=""),
+        level="DEBUG" if debug else "INFO",
+        colorize=True,
+    )
+
+
 class FactorTimingEngine:
     """
-    Main engine for generating factor timing signals.
+    Main engine that combines exposure calculation and regime detection.
 
-    Combines factor exposure calculation and regime detection to generate
-    timing signals. Supports multiple factor generation methods with proper naming.
+    Args:
+        debug (bool): If True, sets logger to DEBUG level for verbose output. Default is False.
     """
 
     def __init__(
@@ -579,15 +590,9 @@ class FactorTimingEngine:
         lookback_period: int = 60,
         n_regimes: int = 3,
         factor_method: str = "macro",
+        debug: bool = False,
     ):
-        """
-        Initialize engine with specified parameters.
-
-        Args:
-            lookback_period: Rolling window for factor exposure calculation
-            n_regimes: Number of regimes to detect
-            factor_method: Factor generation method ("macro", "fama_french", "simple")
-        """
+        set_log_level(debug)
         self.lookback_period = lookback_period
         self.exposure_calculator = FactorExposureCalculator(lookback_period)
         self.regime_detector = RegimeDetector(n_regimes)

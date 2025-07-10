@@ -52,16 +52,17 @@ def fetch_data(
         "-t",
         help="Type of data to fetch: 'returns', 'macro', 'sentiment', or 'all'",
     ),
+    debug: bool = typer.Option(
+        False,
+        "--debug/--no-debug",
+        help="Enable debug logging for this command",
+        show_default=True,
+    ),
 ):
-    """
-    Fetch financial data from various sources.
-
-    This command downloads asset returns, macroeconomic indicators, and sentiment data
-    from Yahoo Finance, FRED, and News API respectively.
-    """
+    """Fetch financial data from various sources. Use --debug for verbose output."""
     logger.info("Starting data fetch operation...")
 
-    loader = DataLoader()
+    loader = DataLoader(debug=debug)
 
     if data_type == "all" or data_type == "returns":
         logger.info("Fetching asset returns...")
@@ -97,8 +98,15 @@ def fetch_data(
 
 
 @app.command()
-def list_data():
-    """List available data files."""
+def list_data(
+    debug: bool = typer.Option(
+        False,
+        "--debug/--no-debug",
+        help="Enable debug logging for this command",
+        show_default=True,
+    ),
+):
+    """List available data files. Use --debug for verbose output."""
     from .config import PROCESSED_DATA_DIR, RAW_DATA_DIR
 
     logger.info("Available data files:")
@@ -123,8 +131,15 @@ def list_data():
 
 
 @app.command()
-def clean_data():
-    """Validate and clean existing data files."""
+def clean_data(
+    debug: bool = typer.Option(
+        False,
+        "--debug/--no-debug",
+        help="Enable debug logging for this command",
+        show_default=True,
+    ),
+):
+    """Validate and clean existing data files. Use --debug for verbose output."""
     import pandas as pd
 
     from .config import PROCESSED_DATA_DIR
@@ -217,8 +232,15 @@ def status():
 
 
 @app.command()
-def validate_data():
-    """Validate data quality without cleaning."""
+def validate_data(
+    debug: bool = typer.Option(
+        False,
+        "--debug/--no-debug",
+        help="Enable debug logging for this command",
+        show_default=True,
+    ),
+):
+    """Validate data quality without cleaning. Use --debug for verbose output."""
     import pandas as pd
 
     from .config import PROCESSED_DATA_DIR
@@ -287,13 +309,20 @@ def validate_data():
 
 
 @app.command()
-def normalize_data():
-    """Normalize processed returns, macro, and sentiment data and save as *_normalized.csv."""
+def normalize_data(
+    debug: bool = typer.Option(
+        False,
+        "--debug/--no-debug",
+        help="Enable debug logging for this command",
+        show_default=True,
+    ),
+):
+    """Normalize processed returns, macro, and sentiment data. Use --debug for verbose output."""
     import pandas as pd
 
     from .config import PROCESSED_DATA_DIR
 
-    loader = DataLoader()
+    loader = DataLoader(debug=debug)
 
     # Normalize returns
     returns_file = PROCESSED_DATA_DIR / "returns_monthly.csv"
@@ -359,13 +388,14 @@ def generate_signals(
         "--factors",
         help="Path to factors CSV file (default: data/processed/macro_monthly.csv)",
     ),
+    debug: bool = typer.Option(
+        False,
+        "--debug/--no-debug",
+        help="Enable debug logging for this command",
+        show_default=True,
+    ),
 ):
-    """
-    Generate factor timing signals from processed data.
-
-    This command calculates factor exposures using rolling regression and detects
-    factor regimes using clustering and HMM methods.
-    """
+    """Generate factor timing signals from processed data. Use --debug for verbose output."""
     from .signals.factor_timing import FactorTimingEngine
 
     logger.info("Starting factor timing signal generation...")
@@ -375,6 +405,7 @@ def generate_signals(
         lookback_period=lookback_period,
         n_regimes=n_regimes,
         factor_method=factor_method,
+        debug=debug,
     )
 
     # Generate signals
@@ -513,13 +544,14 @@ def optimize_portfolio(
         "--transaction-costs",
         help='JSON string mapping asset types to transaction costs (e.g., \'{"ETF":0.0005,"Large_Cap":0.001}\')',
     ),
+    debug: bool = typer.Option(
+        False,
+        "--debug/--no-debug",
+        help="Enable debug logging for this command",
+        show_default=True,
+    ),
 ):
-    """
-    Optimize portfolio using various methods.
-
-    This command runs portfolio optimization using Black-Litterman, Monte Carlo,
-    or combined methods with factor timing integration.
-    """
+    """Optimize portfolio using selected method. Use --debug for verbose output."""
     import json
     from pathlib import Path
 
@@ -554,6 +586,7 @@ def optimize_portfolio(
         max_drawdown=max_drawdown,
         confidence_level=confidence_level,
         random_state=random_state,
+        debug=debug,
     )
 
     # Set Black-Litterman parameters if using BL method
@@ -800,14 +833,14 @@ def run_backtest(
         "--transaction-costs",
         help='JSON string mapping asset types to transaction costs (e.g., \'{"ETF":0.0005,"Large_Cap":0.001}\')',
     ),
+    debug: bool = typer.Option(
+        False,
+        "--debug/--no-debug",
+        help="Enable debug logging for this command",
+        show_default=True,
+    ),
 ):
-    """
-    Run walk-forward backtesting.
-
-    This command performs walk-forward backtesting with configurable train/test windows
-    and rebalance frequencies. It validates data quality, runs portfolio optimization
-    on training windows, and evaluates performance on out-of-sample test periods.
-    """
+    """Run walk-forward backtest. Use --debug for verbose output."""
     import json
     from pathlib import Path
 
@@ -826,6 +859,7 @@ def run_backtest(
         max_volatility=max_volatility,
         random_state=random_state,
         transaction_costs=json.loads(transaction_costs) if transaction_costs else None,
+        debug=debug,
     )
 
     # Load data
@@ -903,44 +937,81 @@ def run_backtest(
         aggregate_metrics = results["aggregate_metrics"]
 
         logger.info(f"Total periods: {aggregate_metrics['total_periods']}")
+
+        # Performance metrics - side by side periodical and annualized
+        logger.info("\n📊 PERFORMANCE METRICS:")
+        logger.info("=" * 50)
         logger.info(
-            f"Average total return: {aggregate_metrics['avg_total_return']:.3f}"
+            f"Average per-period cumulative return: {aggregate_metrics['avg_total_return']:.3f}"
         )
         logger.info(
-            f"Average Sharpe ratio: {aggregate_metrics['avg_sharpe_ratio']:.3f}"
+            f"Annualized average return: {aggregate_metrics['avg_return_annual']:.3f}"
         )
         logger.info(
-            f"Average Sortino ratio: {aggregate_metrics['avg_sortino_ratio']:.3f}"
+            f"Average per-period volatility: {aggregate_metrics['avg_volatility']:.3f} | Annualized: {aggregate_metrics['avg_volatility_annual']:.3f}"
         )
         logger.info(
-            f"Average Calmar ratio: {aggregate_metrics['avg_calmar_ratio']:.3f}"
+            f"Average per-period Sharpe ratio: {aggregate_metrics['avg_sharpe_ratio']:.3f} | Annualized: {aggregate_metrics['avg_sharpe_ratio_annual']:.3f}"
         )
         logger.info(
-            f"Worst max drawdown: {aggregate_metrics['worst_max_drawdown']:.3f}"
-        )
-        logger.info(f"Average volatility: {aggregate_metrics['avg_volatility']:.3f}")
-        logger.info(f"Hit ratio: {aggregate_metrics['hit_ratio']:.3f}")
-        logger.info(
-            f"Excess return vs benchmark: {aggregate_metrics['excess_return']:.3f}"
+            f"Average per-period Sortino ratio: {aggregate_metrics['avg_sortino_ratio']:.3f} | Annualized: {aggregate_metrics['avg_sortino_ratio_annual']:.3f}"
         )
         logger.info(
-            f"Excess Sharpe vs benchmark: {aggregate_metrics['excess_sharpe']:.3f}"
-        )
-        # Add transaction cost reporting
-        logger.info(
-            f"Total transaction costs: {aggregate_metrics['total_transaction_costs']:.4f}"
+            f"Average per-period Calmar ratio: {aggregate_metrics['avg_calmar_ratio']:.3f} | Annualized: {aggregate_metrics['avg_calmar_ratio_annual']:.3f}"
         )
         logger.info(
-            f"Average transaction cost per period: {aggregate_metrics['avg_transaction_cost']:.4f}"
+            f"Worst max drawdown: {aggregate_metrics['worst_max_drawdown']:.3f} (per test period)"
         )
         logger.info(
-            f"Total portfolio turnover: {aggregate_metrics['total_turnover']:.3f}"
+            f"Overall max drawdown: {aggregate_metrics.get('max_drawdown_overall', 0.0):.3f} (entire backtest)"
         )
         logger.info(
-            f"Average turnover per period: {aggregate_metrics['avg_turnover']:.3f}"
+            f"Overall Calmar ratio: {aggregate_metrics.get('calmar_ratio_overall', 0.0):.3f} (entire backtest)"
+        )
+        logger.info(f"Hit ratio: {aggregate_metrics['hit_ratio']:.3f} (success rate)")
+
+        # Benchmark comparison
+        logger.info("\n📈 BENCHMARK COMPARISON:")
+        logger.info("=" * 50)
+        logger.info("60/40 SPY/TLT Benchmark:")
+        logger.info(
+            f"  Excess return: {aggregate_metrics['excess_return_vs_6040']:.3f} (per test period)"
         )
         logger.info(
-            f"Net total return (after costs): {aggregate_metrics['net_total_return']:.3f}"
+            f"  Excess Sharpe: {aggregate_metrics['excess_sharpe_vs_6040']:.3f} (per test period)"
+        )
+        logger.info("SPY (Equity) Benchmark:")
+        logger.info(
+            f"  Excess return: {aggregate_metrics['excess_return_vs_spy']:.3f} (per test period)"
+        )
+        logger.info(
+            f"  Excess Sharpe: {aggregate_metrics['excess_sharpe_vs_spy']:.3f} (per test period)"
+        )
+        logger.info("TLT (Treasury) Benchmark:")
+        logger.info(
+            f"  Excess return: {aggregate_metrics['excess_return_vs_tlt']:.3f} (per test period)"
+        )
+        logger.info(
+            f"  Excess Sharpe: {aggregate_metrics['excess_sharpe_vs_tlt']:.3f} (per test period)"
+        )
+
+        # Transaction costs and turnover
+        logger.info("\n💰 TRANSACTION COSTS & TURNOVER:")
+        logger.info("=" * 50)
+        logger.info(
+            f"Total transaction costs: {aggregate_metrics['total_transaction_costs']:.4f} (cumulative)"
+        )
+        logger.info(
+            f"Average transaction cost: {aggregate_metrics['avg_transaction_cost']:.4f} (per test period)"
+        )
+        logger.info(
+            f"Total portfolio turnover: {aggregate_metrics['total_turnover']:.3f} (cumulative)"
+        )
+        logger.info(
+            f"Average turnover: {aggregate_metrics['avg_turnover']:.3f} (per test period)"
+        )
+        logger.info(
+            f"Net total return: {aggregate_metrics['net_total_return']:.3f} (per test period)"
         )
 
         # Save results
@@ -978,45 +1049,77 @@ def run_backtest(
                 f.write(f"Test years: {test_years}\n")
                 f.write(f"Rebalance frequency: {rebalance_frequency}\n")
                 f.write(f"Total periods: {aggregate_metrics['total_periods']}\n")
+                f.write("\nPERFORMANCE METRICS:\n")
+                f.write("=" * 50 + "\n")
                 f.write(
-                    f"Average total return: {aggregate_metrics['avg_total_return']:.3f}\n"
+                    f"Average per-period cumulative return: {aggregate_metrics['avg_total_return']:.3f}\n"
                 )
                 f.write(
-                    f"Average Sharpe ratio: {aggregate_metrics['avg_sharpe_ratio']:.3f}\n"
+                    f"Annualized average return: {aggregate_metrics['avg_return_annual']:.3f}\n"
                 )
                 f.write(
-                    f"Average Sortino ratio: {aggregate_metrics['avg_sortino_ratio']:.3f}\n"
+                    f"Average per-period volatility: {aggregate_metrics['avg_volatility']:.3f} | Annualized: {aggregate_metrics['avg_volatility_annual']:.3f}\n"
                 )
                 f.write(
-                    f"Average Calmar ratio: {aggregate_metrics['avg_calmar_ratio']:.3f}\n"
+                    f"Average per-period Sharpe ratio: {aggregate_metrics['avg_sharpe_ratio']:.3f} | Annualized: {aggregate_metrics['avg_sharpe_ratio_annual']:.3f}\n"
                 )
                 f.write(
-                    f"Worst max drawdown: {aggregate_metrics['worst_max_drawdown']:.3f}\n"
+                    f"Average per-period Sortino ratio: {aggregate_metrics['avg_sortino_ratio']:.3f} | Annualized: {aggregate_metrics['avg_sortino_ratio_annual']:.3f}\n"
                 )
                 f.write(
-                    f"Average volatility: {aggregate_metrics['avg_volatility']:.3f}\n"
-                )
-                f.write(f"Hit ratio: {aggregate_metrics['hit_ratio']:.3f}\n")
-                f.write(
-                    f"Excess return vs benchmark: {aggregate_metrics['excess_return']:.3f}\n"
+                    f"Average per-period Calmar ratio: {aggregate_metrics['avg_calmar_ratio']:.3f} | Annualized: {aggregate_metrics['avg_calmar_ratio_annual']:.3f}\n"
                 )
                 f.write(
-                    f"Excess Sharpe vs benchmark: {aggregate_metrics['excess_sharpe']:.3f}\n"
+                    f"Worst max drawdown: {aggregate_metrics['worst_max_drawdown']:.3f} (per test period)\n"
                 )
                 f.write(
-                    f"Total transaction costs: {aggregate_metrics['total_transaction_costs']:.4f}\n"
+                    f"Overall max drawdown: {aggregate_metrics.get('max_drawdown_overall', 0.0):.3f} (entire backtest)\n"
                 )
                 f.write(
-                    f"Average transaction cost per period: {aggregate_metrics['avg_transaction_cost']:.4f}\n"
+                    f"Overall Calmar ratio: {aggregate_metrics.get('calmar_ratio_overall', 0.0):.3f} (entire backtest)\n"
                 )
                 f.write(
-                    f"Total portfolio turnover: {aggregate_metrics['total_turnover']:.3f}\n"
+                    f"Hit ratio: {aggregate_metrics['hit_ratio']:.3f} (success rate)\n"
+                )
+                f.write("\nBENCHMARK COMPARISON:\n")
+                f.write("=" * 50 + "\n")
+                f.write("60/40 SPY/TLT Benchmark:\n")
+                f.write(
+                    f"  Excess return: {aggregate_metrics['excess_return_vs_6040']:.3f} (per test period)\n"
                 )
                 f.write(
-                    f"Average turnover per period: {aggregate_metrics['avg_turnover']:.3f}\n"
+                    f"  Excess Sharpe: {aggregate_metrics['excess_sharpe_vs_6040']:.3f} (per test period)\n"
+                )
+                f.write("SPY (Equity) Benchmark:\n")
+                f.write(
+                    f"  Excess return: {aggregate_metrics['excess_return_vs_spy']:.3f} (per test period)\n"
                 )
                 f.write(
-                    f"Net total return (after costs): {aggregate_metrics['net_total_return']:.3f}\n"
+                    f"  Excess Sharpe: {aggregate_metrics['excess_sharpe_vs_spy']:.3f} (per test period)\n"
+                )
+                f.write("TLT (Treasury) Benchmark:\n")
+                f.write(
+                    f"  Excess return: {aggregate_metrics['excess_return_vs_tlt']:.3f} (per test period)\n"
+                )
+                f.write(
+                    f"  Excess Sharpe: {aggregate_metrics['excess_sharpe_vs_tlt']:.3f} (per test period)\n"
+                )
+                f.write("\nTRANSACTION COSTS & TURNOVER:\n")
+                f.write("=" * 50 + "\n")
+                f.write(
+                    f"Total transaction costs: {aggregate_metrics['total_transaction_costs']:.4f} (cumulative)\n"
+                )
+                f.write(
+                    f"Average transaction cost: {aggregate_metrics['avg_transaction_cost']:.4f} (per test period)\n"
+                )
+                f.write(
+                    f"Total portfolio turnover: {aggregate_metrics['total_turnover']:.3f} (cumulative)\n"
+                )
+                f.write(
+                    f"Average turnover: {aggregate_metrics['avg_turnover']:.3f} (per test period)\n"
+                )
+                f.write(
+                    f"Net total return: {aggregate_metrics['net_total_return']:.3f} (per test period)\n"
                 )
 
             logger.success(f"Saved backtest summary to {summary_file}")
@@ -1060,13 +1163,14 @@ def plot_backtest(
         "-t",
         help="Type of plot: 'backtest', 'comparison', 'weights', 'metrics', or 'all'",
     ),
+    debug: bool = typer.Option(
+        False,
+        "--debug/--no-debug",
+        help="Enable debug logging for this command",
+        show_default=True,
+    ),
 ):
-    """
-    Generate plots from backtest results.
-
-    This command creates various visualizations of backtest performance,
-    including cumulative returns, risk metrics, and portfolio evolution.
-    """
+    """Plot backtest results. Use --debug for verbose output."""
     import json
     from pathlib import Path
 
