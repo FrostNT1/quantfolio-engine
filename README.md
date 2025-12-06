@@ -20,7 +20,9 @@ A quantitative portfolio optimization engine designed for institutional asset ma
 - [x] Fetch historical prices for 30–100 assets (e.g. S&P 500 subset, ETFs)
 - [x] Retrieve 5–10 macro indicators from FRED or equivalent
 - [x] Load static or dynamic sentiment scores for corresponding timeframes
-    - ⚠️ Note: Sentiment score is currently placeholder/random. Replace with live data from a real API (e.g., News API, RavenPack) in this phase.
+    - [x] **LLM-based sentiment extraction** using OpenAI GPT-5-nano with Batch API support
+    - [x] VADER sentiment analysis as fallback
+    - [x] Hybrid provider with automatic fallback on API failures
 - [x] Normalize all data (e.g., Z-scores, rolling %change)
     - Normalization implemented for returns, macro, and sentiment data.
 
@@ -102,7 +104,7 @@ A quantitative portfolio optimization engine designed for institutional asset ma
 ### Data Pipeline
 - **Asset-level historical returns** (stocks, ETFs, sectors)
 - **Macroeconomic indicators** (inflation, unemployment, GDP growth)
-- **LLM-based sentiment signals** (FinNews-LLM scores)
+- **LLM-based sentiment signals** (OpenAI GPT-5-nano with Batch API support)
 
 ### Factor Timing Layer
 - Rolling factor exposures (Value, Growth, Momentum)

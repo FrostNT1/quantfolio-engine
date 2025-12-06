@@ -13,6 +13,7 @@ from quantfolio_engine.config import (
 )
 from quantfolio_engine.data.data_loader import (
     DataLoader,
+    LLMSentimentProvider,
     RandomSentimentProvider,
     set_index_name,
     strip_timezone,

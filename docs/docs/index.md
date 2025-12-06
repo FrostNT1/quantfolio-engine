@@ -8,7 +8,7 @@ QuantFolio Engine is a sophisticated quantitative portfolio optimization platfor
 
 ### Key Features
 
-- **📊 Multi-Source Data Integration**: Asset returns, macroeconomic indicators, and sentiment signals
+- **📊 Multi-Source Data Integration**: Asset returns, macroeconomic indicators, and LLM-based sentiment signals (GPT-5-nano)
 - **🎯 Factor Timing**: Dynamic regime detection and factor exposure optimization
 - **⚖️ Advanced Optimization**: Black-Litterman and Monte Carlo simulation methods
 - **📈 Walk-Forward Backtesting**: Comprehensive validation framework with transaction costs

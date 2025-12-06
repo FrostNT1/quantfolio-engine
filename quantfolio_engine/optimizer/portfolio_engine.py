@@ -184,6 +184,12 @@ class PortfolioOptimizationEngine:
             data["sentiment"] = pd.read_csv(
                 sentiment_file, index_col=0, parse_dates=True
             )
+            # Backward compatibility: strip old "sentiment_" prefix from column names
+            data["sentiment"] = data["sentiment"].rename(
+                columns=lambda c: (
+                    c.replace("sentiment_", "") if c.startswith("sentiment_") else c
+                )
+            )
             logger.info(f"Loaded sentiment data: {data['sentiment'].shape}")
         else:
             logger.warning(f"Sentiment file not found: {sentiment_file}")

@@ -218,6 +218,7 @@ def status():
         FRED_API_KEY,
         MACRO_INDICATORS,
         NEWS_API_KEY,
+        OPENAI_API_KEY,
         SENTIMENT_ENTITIES,
         SENTIMENT_TOPICS,
     )
@@ -229,6 +230,9 @@ def status():
     logger.info(f"  Sentiment Topics: {len(SENTIMENT_TOPICS)} topics")
     logger.info(f"  FRED API Key: {'✓' if FRED_API_KEY else '✗'}")
     logger.info(f"  News API Key: {'✓' if NEWS_API_KEY else '✗'}")
+    logger.info(
+        f"  OpenAI API Key: {'✓' if OPENAI_API_KEY else '✗'} (GPT-5-nano for LLM sentiment)"
+    )
 
 
 @app.command()

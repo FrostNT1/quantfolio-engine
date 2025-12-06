@@ -22,6 +22,7 @@ nano .env
 # Data Source API Keys
 FRED_API_KEY=your_fred_api_key_here
 NEWS_API_KEY=your_news_api_key_here
+OPENAI_API_KEY=your_openai_api_key_here
 
 # Optional: AWS S3 for data storage
 AWS_ACCESS_KEY_ID=your_aws_access_key
@@ -76,7 +77,7 @@ FRED_API_KEY=your_fred_api_key_here
 
 ### News API Key
 
-The News API provides sentiment data for factor timing.
+The News API provides article data for sentiment analysis.
 
 1. **Get API Key**:
    - Visit [News API](https://newsapi.org/)
@@ -93,6 +94,29 @@ curl "https://newsapi.org/v2/everything?q=finance&apiKey=YOUR_API_KEY"
 ```env
 NEWS_API_KEY=your_news_api_key_here
 ```
+
+### OpenAI API Key
+
+The OpenAI API provides LLM-based sentiment analysis using GPT-5-nano.
+
+1. **Get API Key**:
+   - Visit [OpenAI Platform](https://platform.openai.com/)
+   - Sign up for an account
+   - Navigate to API Keys section
+   - Create a new API key
+
+2. **Test Your Key**:
+```bash
+# Test OpenAI API access
+python -c "from openai import OpenAI; client = OpenAI(api_key='YOUR_API_KEY'); print('API key valid')"
+```
+
+3. **Add to Environment**:
+```env
+OPENAI_API_KEY=sk-your_openai_api_key_here
+```
+
+**Note**: The system uses GPT-5-nano for sentiment analysis with automatic fallback to VADER if the OpenAI API is unavailable.
 
 ### AWS S3 (Optional)
 

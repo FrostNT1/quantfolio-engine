@@ -53,16 +53,23 @@ MACRO_INDICATORS = {
 }
 
 SENTIMENT_ENTITIES = ["AAPL", "MSFT", "JPM", "WMT", "SPY", "XLE"]
-SENTIMENT_TOPICS = [
-    "interest rates",
-    "inflation",
-    "recession",
-    "growth",
-    "earnings",
-    "Fed",
-    "oil prices",
-    "supply chain",
-]
+
+# Note: Sentiment topics are not supported with Yahoo Finance provider
+# They require a different data source (e.g., News API with topics)
+# Currently disabled to use ticker-only sentiment from Yahoo Finance
+SENTIMENT_TOPICS = []
+
+# Legacy topics (for reference if you implement a topic-based provider):
+# SENTIMENT_TOPICS = [
+#     "interest rates",
+#     "inflation",
+#     "recession",
+#     "growth",
+#     "earnings",
+#     "Fed",
+#     "oil prices",
+#     "supply chain",
+# ]
 
 # Data frequency and date ranges
 DATA_FREQUENCY = "M"  # Monthly
@@ -72,14 +79,18 @@ DEFAULT_END_DATE = None  # Will use current date
 # API Configuration
 FRED_API_KEY = None  # Will be loaded from environment
 NEWS_API_KEY = None  # Will be loaded from environment
+OPENAI_API_KEY = None  # Will be loaded from environment
 
 FRED_API_KEY = os.getenv("FRED_API_KEY")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not FRED_API_KEY:
     logger.warning("FRED_API_KEY not found in environment variables")
 if not NEWS_API_KEY:
     logger.warning("NEWS_API_KEY not found in environment variables")
+if not OPENAI_API_KEY:
+    logger.warning("OPENAI_API_KEY not found in environment variables")
 
 # If tqdm is installed, configure loguru with tqdm.write
 # https://github.com/Delgan/loguru/issues/135
@@ -110,6 +121,7 @@ class DataConfig:
     # API keys
     fred_api_key: Optional[str] = None
     news_api_key: Optional[str] = None
+    openai_api_key: Optional[str] = None
 
     # Data directories
     raw_data_dir: Path = RAW_DATA_DIR
@@ -145,6 +157,7 @@ def get_default_data_config() -> DataConfig:
         data_frequency=DATA_FREQUENCY,
         fred_api_key=FRED_API_KEY,
         news_api_key=NEWS_API_KEY,
+        openai_api_key=OPENAI_API_KEY,
     )
 
 

@@ -316,6 +316,7 @@ The CLI respects the following environment variables:
 # API Keys
 FRED_API_KEY=your_fred_api_key
 NEWS_API_KEY=your_news_api_key
+OPENAI_API_KEY=your_openai_api_key
 
 # Data Paths
 DATA_DIR=data/

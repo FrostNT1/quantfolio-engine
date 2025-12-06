@@ -369,7 +369,7 @@ class RegimeDetector:
     for regime detection with proper scaler management.
     """
 
-    def __init__(self, n_regimes: int = 3):
+    def __init__(self, n_regimes: int = 4):
         """
         Initialize detector with specified number of regimes.
 
